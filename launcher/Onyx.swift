@@ -1099,9 +1099,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             // its own chrome instead — what `data-tauri-drag-region` does for
             // cxtasks and cxmail. The event has to be the live one: NSApp holds
             // the mouse-down that the page is reporting.
-            guard message.frameInfo.isMainFrame, let event = NSApp.currentEvent,
-                event.type == .leftMouseDown || event.type == .leftMouseDragged
-            else {
+            guard message.frameInfo.isMainFrame, let event = NSApp.currentEvent else {
+                replyHandler(false, nil)
+                return
+            }
+            // A double-click in the title band, which the page covers too: it
+            // does what a title bar's does, as the user set it in Desktop & Dock.
+            // A quick second click can be up before the page's message lands,
+            // so its mouse-up counts as well; either way it is the live second click.
+            if body["double"] as? Bool == true {
+                let double = (event.type == .leftMouseDown || event.type == .leftMouseUp)
+                    && event.clickCount == 2
+                replyHandler(double, nil)
+                if double { titleBarDoubleClick() }
+                return
+            }
+            guard event.type == .leftMouseDown || event.type == .leftMouseDragged else {
                 replyHandler(false, nil)
                 return
             }
@@ -1232,6 +1245,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         swipeCover = nil
         webView?.alphaValue = 1
         cover.removeFromSuperview()
+    }
+
+    // "Double-click a window's title bar to" Zoom, Minimize or Do Nothing.
+    // Unset is Zoom; older systems kept Minimize as a Bool of its own. Fill
+    // (macOS 15) has no public call, and zoom to the standard frame is the
+    // screen's visible frame, which is what Fill gives a window like this one.
+    private func titleBarDoubleClick() {
+        let defaults = UserDefaults.standard
+        switch defaults.string(forKey: "AppleActionOnDoubleClick") {
+        case "None":
+            return
+        case "Minimize":
+            window.performMiniaturize(nil)
+        case nil where defaults.bool(forKey: "AppleMiniaturizeOnDoubleClick"):
+            window.performMiniaturize(nil)
+        default:
+            window.performZoom(nil)
+        }
     }
 
     // MARK: - Menu

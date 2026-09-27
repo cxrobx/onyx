@@ -373,18 +373,20 @@ const native=!!(window.webkit&&window.webkit.messageHandlers&&window.webkit.mess
 // under the pointer. With a page open the reader fills that strip, and a mouse-down inside the frame never reaches this
 // document, so the window moved only by its outermost pixel. The band is the top 28 px (the title bar's height) across
 // the shell and every reader frame (readerDragDown, bound by onReaderLoad), minus any control there: the page's own,
-// the widget's (.askw-root: the context pill sits in the band), and a dialog's.
+// the widget's (.askw-root: the context pill sits in the band), and a dialog's. A double-click there is a title bar's
+// too, and the app does what Desktop & Dock says (zoom, by default); a pinned tab bar is title bar all the way down.
 const DRAG_KEEP='a,button,input,textarea,select,summary,label,[contenteditable],[draggable=true],[data-nodrag]';
 const DRAG_BAND=28,BAND_KEEP=DRAG_KEEP+',dialog,[role=search],[role=button],[role=tab],[role=link],[role=menuitem],video,audio,canvas,.askw-root';
-function dragWindow(){{Promise.resolve(window.webkit.messageHandlers.askwDrag.postMessage({{}})).catch(()=>{{}})}}
+function dragWindow(double){{Promise.resolve(window.webkit.messageHandlers.askwDrag.postMessage(double?{{double:true}}:{{}})).catch(()=>{{}})}}
 if(native)document.addEventListener('mousedown',e=>{{const t=e.target;
-if(e.button!==0||e.detail>1||!(t instanceof Element))return;
-if(t.closest('[data-drag]')?!t.closest(DRAG_KEEP):e.clientY<DRAG_BAND&&!t.closest(BAND_KEEP))dragWindow()}});
+if(e.button!==0||e.detail>2||!(t instanceof Element))return;
+if(!(t.closest('[data-drag]')?!t.closest(DRAG_KEEP):e.clientY<DRAG_BAND&&!t.closest(BAND_KEEP)))return;
+if(e.detail<2)dragWindow();else if(e.clientY<DRAG_BAND||t.closest('#tab-bar')){{e.preventDefault();dragWindow(true)}}}});
 // A frame's band is measured from the window's top, so under a pinned tab bar the reader has none. The mouse-down is
 // kept from the page, or a press there would start a selection or drop the one being asked about; a double-click, too.
 function readerDragDown(e){{const t=e.target,f=e.view&&e.view.frameElement;
 if(e.button!==0||!f||!t||!t.closest||f.getBoundingClientRect().top+e.clientY>=DRAG_BAND||t.closest(BAND_KEEP))return;
-e.preventDefault();if(e.detail<2)dragWindow()}}
+e.preventDefault();if(e.detail<3)dragWindow(e.detail===2)}}
 {glass_js}
 // What each view calls itself; a switch (switchVault, below) moves KIND and everything that hangs off it in place. Library
 // is both vaults at once, each tree under its own heading, so every row says which vault it belongs to (data-vault).

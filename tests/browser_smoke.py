@@ -3757,8 +3757,9 @@ class BrowserSmokeTests(unittest.TestCase):
     def test_the_window_drags_by_its_title_band_over_the_page(self) -> None:
         # "I can't drag the window except by the very edge of the top border": with a page open the reader fills the
         # title band, and a mouse-down inside the frame never reached the shell's listener. The top 28 px now drag the
-        # window across the reader too, except where a control is under the pointer. The app half (askwDrag drags by
-        # the live NSEvent) was checked in the app's own WebKit; here the page's half, in both engines.
+        # window across the reader too, except where a control is under the pointer, and a double-click there does what
+        # a title bar's does. The app half (askwDrag acts on the live NSEvent) was checked in the app's own WebKit; here
+        # the page's half, in both engines.
         artifacts = self.root / "Artifacts"
         artifacts.mkdir()
         body = "".join(f"<p>Paragraph {i} of the page.</p>" for i in range(60))
@@ -3772,7 +3773,8 @@ class BrowserSmokeTests(unittest.TestCase):
         self.app.state.storage.update_settings({"html_vault_root": str(artifacts)}, model_default="sonnet")
         stub = """if (window.top === window) window.webkit = {messageHandlers: {
             askwPick: {postMessage() { return Promise.resolve(null) }},
-            askwDrag: {postMessage() { window.__drags = (window.__drags || 0) + 1; return Promise.resolve(true) }}}}"""
+            askwDrag: {postMessage(m) { (window.__drags = window.__drags || []).push(m && m.double ? 'double' : 'drag');
+                return Promise.resolve(true) }}}}"""
         page_errors: list[str] = []
         with sync_playwright() as playwright:
             for engine in ("chromium", "webkit"):
@@ -3788,8 +3790,14 @@ class BrowserSmokeTests(unittest.TestCase):
                     pill = frame.locator(".askw-pill")
                     pill.wait_for()
 
-                    def drags() -> int:
-                        return page.evaluate("window.__drags || 0")
+                    def drags(kind: str = "drag") -> int:
+                        return page.evaluate("k => (window.__drags || []).filter(d => d === k).length", kind)
+
+                    def double_click(x: float, y: float) -> tuple[int, int]:
+                        before = drags(), drags("double")
+                        page.mouse.dblclick(x, y)
+                        page.wait_for_timeout(50)
+                        return drags() - before[0], drags("double") - before[1]
 
                     def press(x: float, y: float) -> int:
                         before = drags()
@@ -3814,12 +3822,15 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.mouse.up()
                     self.assertEqual(drags() - before, 1)
                     self.assertEqual(selected(), "")
-                    # A double-click there is one drag, and selects no word.
-                    before = drags()
-                    page.mouse.dblclick(*words)
-                    page.wait_for_timeout(50)
-                    self.assertEqual(drags() - before, 1)
+                    # A double-click there is the title bar's (its first press a drag), and selects no word.
+                    self.assertEqual(double_click(*words), (1, 1))
                     self.assertEqual(selected(), "")
+                    # Below the band, and on a control in it, a double-click is the page's.
+                    self.assertEqual(double_click(reader["x"] + 60, 120), (0, 0))
+                    btn = frame.locator("#btn").bounding_box()
+                    self.assertEqual(double_click(btn["x"] + btn["width"] / 2, btn["y"] + btn["height"] / 2), (0, 0))
+                    # The sidebar drags the window all the way down, but only its top is title bar.
+                    self.assertEqual(double_click(150, 40), (1, 0))
                     # Below the band the page is the page: no drag, and a press-and-drag selects.
                     self.assertEqual(press(reader["x"] + 60, 120), 0)
                     page.mouse.move(reader["x"] + 20, 120)
@@ -3838,10 +3849,13 @@ class BrowserSmokeTests(unittest.TestCase):
                     self.assertEqual(press(pill_box["x"] + pill_box["width"] / 2, pill_box["y"] + 6), 0)
 
                     # Pinned, the tab bar is the band: its empty space drags, and the reader below it no longer does.
+                    # The whole bar is title bar to a double-click, below the 28 px as well.
                     page.keyboard.press("Meta+Alt+Backslash")
                     page.wait_for_function("() => Math.round(document.querySelector('#reader').getBoundingClientRect().top) === 40")
                     self.assertEqual(press(reader["x"] + 40, 20), 1)
                     self.assertEqual(press(reader["x"] + 120, 54), 0)
+                    self.assertEqual(double_click(reader["x"] + 40, 35), (1, 1))
+                    self.assertEqual(double_click(reader["x"] + 120, 54), (0, 0))
                     browser.close()
 
         self.assertEqual(page_errors, [])
