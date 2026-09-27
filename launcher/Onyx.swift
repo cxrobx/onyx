@@ -1097,26 +1097,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             // the window by is the thin band of title bar over the page. The
             // shell hands the mouse-down straight back and the window drags by
             // its own chrome instead — what `data-tauri-drag-region` does for
-            // cxtasks and cxmail. The event has to be the live one: NSApp holds
-            // the mouse-down that the page is reporting.
-            guard message.frameInfo.isMainFrame, let event = NSApp.currentEvent else {
+            // cxtasks and cxmail, and the way their Tauri does it (tao's
+            // drag_window): drag by NSApp's current event, whatever the page
+            // took to report it. On a Force Touch trackpad that is a pressure
+            // event, which keeps arriving while the finger is down and cannot
+            // start a drag, so it stands in a mouse-down at the pointer. A check
+            // for a mouse-down here refused every drag on the trackpad.
+            guard message.frameInfo.isMainFrame, var event = NSApp.currentEvent else {
                 replyHandler(false, nil)
                 return
             }
-            // A double-click in the title band, which the page covers too: it
-            // does what a title bar's does, as the user set it in Desktop & Dock.
-            // A quick second click can be up before the page's message lands,
-            // so its mouse-up counts as well; either way it is the live second click.
+            // A double-click in the title band, which the page covers too, sent
+            // on its mouse-up as Tauri does on macOS: it does what a title bar's
+            // does, as the user set it in Desktop & Dock.
             if body["double"] as? Bool == true {
-                let double = (event.type == .leftMouseDown || event.type == .leftMouseUp)
-                    && event.clickCount == 2
-                replyHandler(double, nil)
-                if double { titleBarDoubleClick() }
+                replyHandler(true, nil)
+                titleBarDoubleClick()
                 return
             }
-            guard event.type == .leftMouseDown || event.type == .leftMouseDragged else {
-                replyHandler(false, nil)
-                return
+            if event.type == .pressure, let down = NSEvent.mouseEvent(
+                with: .leftMouseDown,
+                location: window.convertPoint(fromScreen: NSEvent.mouseLocation),
+                modifierFlags: event.modifierFlags, timestamp: event.timestamp,
+                windowNumber: window.windowNumber, context: nil, eventNumber: 0,
+                clickCount: 1, pressure: 1
+            ) {
+                event = down
             }
             // Reply first: performDrag(with:) runs its own event loop and does
             // not return until the mouse comes up.

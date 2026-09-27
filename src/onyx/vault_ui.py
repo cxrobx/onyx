@@ -378,15 +378,22 @@ const native=!!(window.webkit&&window.webkit.messageHandlers&&window.webkit.mess
 const DRAG_KEEP='a,button,input,textarea,select,summary,label,[contenteditable],[draggable=true],[data-nodrag]';
 const DRAG_BAND=28,BAND_KEEP=DRAG_KEEP+',dialog,[role=search],[role=button],[role=tab],[role=link],[role=menuitem],video,audio,canvas,.askw-root';
 function dragWindow(double){{Promise.resolve(window.webkit.messageHandlers.askwDrag.postMessage(double?{{double:true}}:{{}})).catch(()=>{{}})}}
-if(native)document.addEventListener('mousedown',e=>{{const t=e.target;
-if(e.button!==0||e.detail>2||!(t instanceof Element))return;
-if(!(t.closest('[data-drag]')?!t.closest(DRAG_KEEP):e.clientY<DRAG_BAND&&!t.closest(BAND_KEEP)))return;
-if(e.detail<2)dragWindow();else if(e.clientY<DRAG_BAND||t.closest('#tab-bar')){{e.preventDefault();dragWindow(true)}}}});
-// A frame's band is measured from the window's top, so under a pinned tab bar the reader has none. The mouse-down is
-// kept from the page, or a press there would start a selection or drop the one being asked about; a double-click, too.
-function readerDragDown(e){{const t=e.target,f=e.view&&e.view.frameElement;
-if(e.button!==0||!f||!t||!t.closest||f.getBoundingClientRect().top+e.clientY>=DRAG_BAND||t.closest(BAND_KEEP))return;
-e.preventDefault();if(e.detail<3)dragWindow(e.detail===2)}}
+// Where a press lands: 2 in the title band (or on a pinned tab bar), 1 elsewhere in the chrome, 0 on a control or the page.
+// A frame's band is measured from the window's top, so under a pinned tab bar the reader has none.
+function shellDragAt(e){{const t=e.target;if(!(t instanceof Element))return 0;
+if(t.closest('[data-drag]')?t.closest(DRAG_KEEP):e.clientY>=DRAG_BAND||t.closest(BAND_KEEP))return 0;return e.clientY<DRAG_BAND||t.closest('#tab-bar')?2:1}}
+function readerDragAt(e){{const t=e.target,f=e.view&&e.view.frameElement;
+return f&&t&&t.closest&&f.getBoundingClientRect().top+e.clientY<DRAG_BAND&&!t.closest(BAND_KEEP)?2:0}}
+// As Tauri's drag.js does it on macOS, for cxtasks and cxmail: a press drags, and a double-click in the title band is sent
+// on its mouse-up, only if the pointer has not moved. The press is kept from the page, so it starts no selection and
+// drops none, and a double-click selects no word.
+let dragDbl=null;
+function dragDown(e,at){{const where=at(e);if(e.button!==0||!where)return;e.preventDefault();
+if(e.detail===1)dragWindow();else if(e.detail===2&&where===2)dragDbl=[e.view,e.clientX,e.clientY]}}
+function dragUp(e,at){{const d=dragDbl;dragDbl=null;
+if(e.button===0&&e.detail===2&&d&&d[0]===e.view&&d[1]===e.clientX&&d[2]===e.clientY&&at(e)===2)dragWindow(true)}}
+if(native){{document.addEventListener('mousedown',e=>dragDown(e,shellDragAt));document.addEventListener('mouseup',e=>dragUp(e,shellDragAt))}}
+function readerDragDown(e){{dragDown(e,readerDragAt)}} function readerDragUp(e){{dragUp(e,readerDragAt)}}
 {glass_js}
 // What each view calls itself; a switch (switchVault, below) moves KIND and everything that hangs off it in place. Library
 // is both vaults at once, each tree under its own heading, so every row says which vault it belongs to (data-vault).
@@ -673,7 +680,7 @@ function readerFolder(){{try{{return new URLSearchParams(reader.contentWindow.lo
 // again binds nothing twice, and one that throws is reported without stopping the rest.
 const READER_HOOKS=[]; function onReaderLoad(fn){{READER_HOOKS.push(fn)}}
 function readerLoaded(){{readerFollow();for(const fn of READER_HOOKS)try{{fn()}}catch(e){{setTimeout(()=>{{throw e}})}}}}
-if(native)onReaderLoad(()=>{{try{{reader.contentWindow.addEventListener('mousedown',readerDragDown,true)}}catch(e){{}}}});
+if(native)onReaderLoad(()=>{{try{{const w=reader.contentWindow;w.addEventListener('mousedown',readerDragDown,true);w.addEventListener('mouseup',readerDragUp,true)}}catch(e){{}}}});
 function readerFollow(){{try{{reader.contentWindow.addEventListener('keydown',sideKey)}}catch(e){{}}syncOverlays();outlineLoaded();const src=currentSrc();if(!src){{if(!readerPage()){{history.replaceState(null,'',shellUrl(KIND,''));document.title=VAULT.name}}return}}
 const k=vaultOf(src);if(k&&KIND!=='library'&&k!==KIND&&traversed())switchVault(k,true);highlight(src);history.replaceState(null,'',shellUrl(KIND,src,KIND==='library'&&!k?readerFolder():''));let t='';try{{t=reader.contentDocument.title}}catch(e){{}}document.title=(t||src.split('/').pop())+' — '+VAULT.name;rememberLast(src)}}
 {tabs_js}
