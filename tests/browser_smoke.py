@@ -3754,6 +3754,98 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_the_window_drags_by_its_title_band_over_the_page(self) -> None:
+        # "I can't drag the window except by the very edge of the top border": with a page open the reader fills the
+        # title band, and a mouse-down inside the frame never reached the shell's listener. The top 28 px now drag the
+        # window across the reader too, except where a control is under the pointer. The app half (askwDrag drags by
+        # the live NSEvent) was checked in the app's own WebKit; here the page's half, in both engines.
+        artifacts = self.root / "Artifacts"
+        artifacts.mkdir()
+        body = "".join(f"<p>Paragraph {i} of the page.</p>" for i in range(60))
+        (artifacts / "top.html").write_text(
+            # Clear of the reader's middle 60 %, where resting in the band brings the tab bar's card out over the page.
+            '<title>Top</title><body style="margin:0"><p id=top style="margin:0;padding:6px 0 0 20px;font:14px/18px'
+            ' sans-serif"><button id=btn style="font:11px/12px sans-serif">Press</button> Words at the very top</p>'
+            f"{body}</body>",
+            encoding="utf-8",
+        )
+        self.app.state.storage.update_settings({"html_vault_root": str(artifacts)}, model_default="sonnet")
+        stub = """if (window.top === window) window.webkit = {messageHandlers: {
+            askwPick: {postMessage() { return Promise.resolve(null) }},
+            askwDrag: {postMessage() { window.__drags = (window.__drags || 0) + 1; return Promise.resolve(true) }}}}"""
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.add_init_script(stub)
+                    src = urllib.parse.quote(str(artifacts / "top.html"))
+                    page.goto(f"{self.base_url}/vault?vault=html&src={src}", wait_until="networkidle")
+                    frame = page.frame_locator("#reader")
+                    frame.locator("#top").wait_for()
+                    pill = frame.locator(".askw-pill")
+                    pill.wait_for()
+
+                    def drags() -> int:
+                        return page.evaluate("window.__drags || 0")
+
+                    def press(x: float, y: float) -> int:
+                        before = drags()
+                        page.mouse.move(x, y)
+                        page.mouse.down()
+                        page.mouse.up()
+                        page.wait_for_timeout(50)
+                        return drags() - before
+
+                    def selected() -> str:
+                        return frame.locator("body").evaluate("() => getSelection().toString()")
+
+                    reader = page.locator("#reader").bounding_box()
+                    self.assertEqual(reader["y"], 0)
+                    words = (reader["x"] + 120, 14)
+                    # The words under the title band drag the window, and a press there starts no selection.
+                    self.assertEqual(press(*words), 1)
+                    before = drags()
+                    page.mouse.move(*words)
+                    page.mouse.down()
+                    page.mouse.move(reader["x"] + 600, 200, steps=5)
+                    page.mouse.up()
+                    self.assertEqual(drags() - before, 1)
+                    self.assertEqual(selected(), "")
+                    # A double-click there is one drag, and selects no word.
+                    before = drags()
+                    page.mouse.dblclick(*words)
+                    page.wait_for_timeout(50)
+                    self.assertEqual(drags() - before, 1)
+                    self.assertEqual(selected(), "")
+                    # Below the band the page is the page: no drag, and a press-and-drag selects.
+                    self.assertEqual(press(reader["x"] + 60, 120), 0)
+                    page.mouse.move(reader["x"] + 20, 120)
+                    page.mouse.down()
+                    page.mouse.move(reader["x"] + 400, 200, steps=5)
+                    page.mouse.up()
+                    self.assertNotEqual(selected(), "")
+                    # A control in the band keeps its click: the page's own button, and the widget's context pill.
+                    button, box = frame.locator("#btn"), frame.locator("#btn").bounding_box()
+                    self.assertLess(box["y"] + box["height"], 28)
+                    button.evaluate("b => b.onclick = () => window.__pressed = true")
+                    self.assertEqual(press(box["x"] + box["width"] / 2, box["y"] + box["height"] / 2), 0)
+                    self.assertTrue(frame.locator("body").evaluate("() => window.__pressed === true"))
+                    pill_box = pill.bounding_box()
+                    self.assertLess(pill_box["y"], 28)
+                    self.assertEqual(press(pill_box["x"] + pill_box["width"] / 2, pill_box["y"] + 6), 0)
+
+                    # Pinned, the tab bar is the band: its empty space drags, and the reader below it no longer does.
+                    page.keyboard.press("Meta+Alt+Backslash")
+                    page.wait_for_function("() => Math.round(document.querySelector('#reader').getBoundingClientRect().top) === 40")
+                    self.assertEqual(press(reader["x"] + 40, 20), 1)
+                    self.assertEqual(press(reader["x"] + 120, 54), 0)
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_tab_bar_comes_out_at_the_top_edge_and_pins_as_a_band(self) -> None:
         # The bar behaves as the sidebar and the outline do: away until the pointer rests in the top 24 px of the
         # reader's middle 60 %, gone 400 ms after it leaves unless its list is open, and pinned it is a band that
