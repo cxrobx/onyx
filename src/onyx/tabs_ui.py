@@ -23,9 +23,9 @@ pointer, pushing the others aside, and rolls a title still cut; the script's ``t
 
 The script runs inside the shell's ``<script>`` and leans on it: ``$``, ``esc``, ``store``, ``recall``, ``reader``
 (reassigned here), ``stage``, ``KIND``, ``VAULTS``, ``switchVault``, ``showHome``, ``empty``, ``home``, ``goHome``,
-``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``navigate`` and
-``readerPage``; the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs ``restoreTabs`` as it starts, and
-``remapTabs`` when Artifacts moves a page.
+``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``navigate``, ``readerPage``
+and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs ``restoreTabs`` as
+it starts, and ``remapTabs`` when Artifacts moves a page.
 """
 
 from __future__ import annotations
@@ -225,7 +225,7 @@ clearTimeout(tabsTimer);tabsAtEdge=false;tabsOut(!on&&(tabsOver||tabsInUse()));i
 // The top 24 px of the reader's middle 60 %: clear of the traffic lights on the left and the corner's floaters on the right.
 function tabsZone(x,y,w){return y>=0&&y<=24&&Math.abs(x-w/2)<=w*.3}
 function tabsAt(at){if(at===tabsAtEdge)return;tabsAtEdge=at;clearTimeout(tabsTimer);if(at)tabsTimer=setTimeout(()=>tabsOut(true),40);else if(document.body.classList.contains('tabs-out')&&!tabsOver)tabsLater()}
-function tabsEdgeMove(e){if(tabsPinned())return;const w=e.view||window;if(w===window){const r=stage.getBoundingClientRect(),t=e.target;tabsAt(!(t.closest&&t.closest('.find-bar,.outline-toggle'))&&tabsZone(e.clientX-r.left,e.clientY-r.top,r.width));return}tabsAt(tabsZone(e.clientX,e.clientY,w.innerWidth))}
+function tabsEdgeMove(e){if(tabsPinned()||pageOnly())return;const w=e.view||window;if(w===window){const r=stage.getBoundingClientRect(),t=e.target;tabsAt(!(t.closest&&t.closest('.find-bar,.outline-toggle'))&&tabsZone(e.clientX-r.left,e.clientY-r.top,r.width));return}tabsAt(tabsZone(e.clientX,e.clientY,w.innerWidth))}
 function tabsEdgeLeave(){if(!tabsPinned())tabsAt(false)}
 function tabsKey(e){if(e.code==='Backslash'&&e.altKey&&(e.metaKey||e.ctrlKey)&&!e.shiftKey){e.preventDefault();setTabsPinned(!tabsPinned())}}
 stage.addEventListener('mousemove',tabsEdgeMove,{passive:true});stage.addEventListener('mouseleave',tabsEdgeLeave);

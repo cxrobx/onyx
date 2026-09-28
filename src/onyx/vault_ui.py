@@ -336,6 +336,11 @@ body:not(.outline-docked) #outline-side{{transition:transform .13s cubic-bezier(
 body:not(.outline-docked) #outline-grip::after{{top:10px;bottom:10px;left:2px}}
 #outline-grip:hover::after,body.outline-resizing #outline-grip::after{{opacity:.7}}
 body.outline-resizing,body.outline-resizing *{{cursor:col-resize!important;user-select:none;-webkit-user-select:none}} body.outline-resizing .shell,body.outline-resizing #outline-side{{transition:none!important}} body.outline-resizing #reader{{pointer-events:none}}
+/* Page Only (⌘B, the script's `page only` mark): the reader is the whole window. The panels go whether pinned or not,
+   with the edge and the toggle that bring them out; the pins stay as they were. In and out at once, with no glide. */
+body.page-only .shell{{grid-template-columns:minmax(0,1fr)!important;grid-template-rows:minmax(0,1fr)!important}} body.page-only #reader-pane{{grid-template-rows:0 minmax(0,1fr)!important}}
+body.page-only #vault-side,body.page-only #outline-side,body.page-only #side-edge,body.page-only #tab-bar,body.page-only .outline-toggle{{display:none!important}}
+body.page-still .shell,body.page-still #reader-pane{{transition:none!important}}
 {panels_css}
 {search_css}
 {find_css}
@@ -388,7 +393,7 @@ return f&&t&&t.closest&&f.getBoundingClientRect().top+e.clientY<DRAG_BAND&&!t.cl
 // on its mouse-up, only if the pointer has not moved. The press is kept from the page, so it starts no selection and
 // drops none, and a double-click selects no word.
 let dragDbl=null;
-function dragDown(e,at){{const where=at(e);if(e.button!==0||!where)return;e.preventDefault();
+function dragDown(e,at){{if(pageOnly())return;const where=at(e);if(e.button!==0||!where)return;e.preventDefault();
 if(e.detail===1)dragWindow();else if(e.detail===2&&where===2)dragDbl=[e.view,e.clientX,e.clientY]}}
 function dragUp(e,at){{const d=dragDbl;dragDbl=null;
 if(e.button===0&&e.detail===2&&d&&d[0]===e.view&&d[1]===e.clientX&&d[2]===e.clientY&&at(e)===2)dragWindow(true)}}
@@ -506,7 +511,7 @@ function outKey(e){{if((e.key==='\\\\'||e.key==='|')&&e.shiftKey&&(e.metaKey||e.
 outPin.onclick=()=>setOutlinePinned(!outPinned); document.addEventListener('keydown',outKey); narrow.addEventListener('change',applyOutlinePin);
 outToggle.addEventListener('mouseenter',()=>{{clearTimeout(outTimer);outTimer=setTimeout(()=>outOut(true),40)}}); outToggle.addEventListener('mouseleave',e=>{{if(outSide.contains(e.relatedTarget))return;clearTimeout(outTimer);if(document.body.classList.contains('outline-out'))outLater()}});
 outToggle.onclick=()=>{{clearTimeout(outTimer);outOut(true)}};
-let outAtEdge=false; function outEdgeMove(e){{const w=e.view||window,at=!outDocked()&&w.innerWidth-e.clientX<=24;if(at===outAtEdge)return;outAtEdge=at;clearTimeout(outTimer);if(at)outTimer=setTimeout(()=>outOut(true),40);else if(document.body.classList.contains('outline-out'))outLater()}}
+let outAtEdge=false; function outEdgeMove(e){{const w=e.view||window,at=!outDocked()&&!pageOnly()&&w.innerWidth-e.clientX<=24;if(at===outAtEdge)return;outAtEdge=at;clearTimeout(outTimer);if(at)outTimer=setTimeout(()=>outOut(true),40);else if(document.body.classList.contains('outline-out'))outLater()}}
 outSide.addEventListener('mouseenter',()=>{{outOver=true;clearTimeout(outTimer)}}); outSide.addEventListener('mouseleave',()=>{{outOver=false;outLater()}}); outSide.addEventListener('focusout',()=>{{if(!outOver)outLater()}});
 outSide.addEventListener('keydown',e=>{{if(e.key!=='Escape')return;if(document.activeElement===outFilter&&outFilter.value){{outFilter.value='';applyOutFilter()}}else{{document.activeElement.blur();if(!outDocked())outOut(false)}}}});
 // MARK: panel width — the grip on its left edge, dragged docked or floating, as the sidebar's is on the right;
@@ -697,7 +702,7 @@ let filterTimer; filter.oninput=()=>{{clearTimeout(filterTimer);filterTimer=setT
 async function applyFilter(){{const q=filter.value.trim(),k=KIND;if(q.length<2){{renderTree();return}}const lib=k==='library',kinds=lib?BOTH.filter(rootOf):[k];
 try{{const found=await Promise.all(kinds.map(vk=>api('/api/vault/search?vault='+vk+'&q='+encodeURIComponent(q)+(lib?'&limit=25':'')).then(d=>d.items.map(i=>({{...i,k:vk}})))));if(k!==KIND)return;const items=found.flat();hidePeek();NODES.clear();items.forEach(i=>NODES.set(i.path,{{n:i,crumbs:(i.folder||'').split('/').filter(Boolean),k:i.k}}));
 tree.innerHTML='<ul class="root results">'+items.map(i=>`<li><a class=file target=reader href="${{esc(viewHref(i.path,i.k))}}" data-path="${{esc(i.path)}}" data-vault=${{i.k}}><span class=lbl>${{esc(i.k==='html'?(i.title||i.name):label(i,i.k))}}</span><small>${{esc(lib?GROUPS[i.k]+(i.folder?' › '+i.folder:''):(i.folder||'/'))}}</small></a></li>`).join('')+(items.length?'':`<li class=none>${{lib?'Nothing matches.':'No '+UNIT+'s match.'}}</li>`)+'</ul>';highlight(currentSrc())}}catch(e){{if(k===KIND)tree.innerHTML=`<div class=none>${{esc(e.message)}}</div>`}}}}
-document.addEventListener('keydown',e=>{{const typing=/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement&&document.activeElement.tagName);if(e.key==='/'&&!typing&&!e.metaKey&&!e.ctrlKey){{e.preventDefault();if(!pinned())sideOut(true);filter.focus();filter.select()}}else if(e.key==='Escape'&&document.activeElement===filter){{filter.value='';applyFilter();filter.blur()}}}});
+document.addEventListener('keydown',e=>{{const typing=/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement&&document.activeElement.tagName);if(e.key==='/'&&!typing&&!e.metaKey&&!e.ctrlKey&&!pageOnly()){{e.preventDefault();if(!pinned())sideOut(true);filter.focus();filter.select()}}else if(e.key==='Escape'&&document.activeElement===filter){{filter.value='';applyFilter();filter.blur()}}}});
 // MARK: row menu — the app's rendered menu (static/app-menu.js). The server says what a row really is (its real file, and
 // the link on the way); ⌥ turns each Reveal into a Copy. A mousedown while the answer is in flight means it came too late.
 let menuSeq=0; document.addEventListener('mousedown',()=>{{menuSeq++}},true);
@@ -867,7 +872,25 @@ window.onyxVault={{switchTo:k=>{{if(!VAULTS[k])return false;switchVault(k);retur
 // the key typed out here in the sidebar; typed inside the page, ask.js takes it itself. A page that can't be edited says so.
 function readerEdit(){{try{{const w=reader.contentWindow;if(readerPage()&&w&&w.askwToggleEdit){{w.askwToggleEdit();return true}}}}catch(e){{}}return false}}
 document.addEventListener('keydown',e=>{{if((e.metaKey||e.ctrlKey)&&!e.shiftKey&&!e.altKey&&e.key.toLowerCase()==='e'&&readerEdit())e.preventDefault()}});
-window.onyxShell={{openSettings:section=>PANELS.openSettings(section),openHistory:()=>PANELS.openHistory(),openSearch:()=>SEARCH.open(),find:verb=>FIND.run(verb),edit:()=>readerEdit(),...TAB_SHELL}};
+// MARK: page only — ⌘B leaves the page alone in the window, for an artifact whose own controls sit where Onyx's come out:
+// a nav bar across the top of the page brought the tab bar's card out over its links, so they could not be clicked
+// (2026-09-27). The panels go, pinned or not, with everything that brings one out (the edges, the tab bar's zone, the
+// round toggle); the title band stops dragging the window; the widget hides its buttons in every page (ask.js asks
+// pageOnly() as a page starts, and the frames already open are marked here); and the app hides the traffic lights
+// (askwChrome). The pins are left alone, so ⌘B again puts back what was there. Not remembered: a relaunch into a
+// window with no sidebar would be a puzzle. ⌘B in the editor is still bold: CodeMirror takes the key first, and a key a
+// page has taken, or typed into rich text, is left to it. View ▸ Page Only in the app serves a click.
+function pageOnly(){{return document.body.classList.contains('page-only')}}
+function setPageOnly(on){{if(on===pageOnly())return true;const a=document.activeElement,lost=on&&!!a&&[side,outSide,tabBar].some(p=>p.contains(a));
+document.body.classList.add('page-still');document.body.classList.toggle('page-only',on);
+clearTimeout(sideTimer);clearTimeout(outTimer);clearTimeout(tabsTimer);outAtEdge=false;tabsAtEdge=false;if(on){{sideOut(false);outOut(false);tabsOut(false)}}
+for(const f of stage.querySelectorAll('iframe'))try{{f.contentDocument.documentElement.toggleAttribute('data-askw-page-only',on)}}catch(e){{}}
+if(lost)try{{reader.contentWindow.focus()}}catch(e){{}}
+const h=native&&window.webkit.messageHandlers.askwChrome;if(h)Promise.resolve(h.postMessage({{pageOnly:on}})).catch(()=>{{}});
+requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.remove('page-still')));return true}}
+function pageOnlyKey(e){{if(e.defaultPrevented||!(e.metaKey||e.ctrlKey)||e.altKey||e.shiftKey||(e.key||'').toLowerCase()!=='b'||(e.target&&e.target.isContentEditable))return;e.preventDefault();setPageOnly(!pageOnly())}}
+document.addEventListener('keydown',pageOnlyKey);onReaderLoad(()=>{{try{{reader.contentWindow.addEventListener('keydown',pageOnlyKey)}}catch(e){{}}}});
+window.onyxShell={{pageOnly:()=>pageOnly(),togglePageOnly:()=>setPageOnly(!pageOnly()),openSettings:section=>PANELS.openSettings(section),openHistory:()=>PANELS.openHistory(),openSearch:()=>SEARCH.open(),find:verb=>FIND.run(verb),edit:()=>readerEdit(),...TAB_SHELL}};
 // Put back as it was left without a slide: the page opens with the sidebar already away.
 if(/^(unpinned|collapsed)$/.test(recall(SIDE_KEY)||'')){{document.body.classList.add('side-still');setPinned(false);requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.remove('side-still')))}}
 // The outline likewise: docked at once if it was pinned, else away until its toggle is hovered.

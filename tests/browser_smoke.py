@@ -3971,6 +3971,165 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_command_b_leaves_the_page_alone_in_the_window(self) -> None:
+        # "In some artifacts the buttons of the app clash with the buttons of the HTML": a nav bar across the top of the
+        # page sits in the tab bar's zone, so resting on one of its links brought the bar's card out over it. ⌘B is Page
+        # Only: no panel, pinned or not, nothing that brings one out, no drag in the title band and none of the widget's
+        # buttons, while the right-click menu and the keys still work; ⌘B again puts back exactly what was there.
+        artifacts = self.root / "Artifacts"
+        artifacts.mkdir()
+        sections = "".join(
+            f'<section id={name.lower()} style="min-height:900px;padding:20px"><h2>{name}</h2>'
+            f"<p>{name} is a section of the page, long enough to scroll to.</p></section>"
+            for name in ("One", "Two", "Three", "Four")
+        )
+        (artifacts / "nav.html").write_text(
+            '<title>Nav</title><body style="margin:0;font:14px/1.5 sans-serif">'
+            '<nav style="position:sticky;top:0;display:flex;justify-content:center;align-items:center;gap:28px;'
+            'height:40px;background:#111">'
+            + "".join(f'<a href="#{n}" style="color:#eee;font-size:11px">{n.upper()}</a>' for n in ("one", "two", "three", "four"))
+            + '</nav><div id=ed contenteditable style="margin:20px">Rich text</div>'
+            + sections + "</body>",
+            encoding="utf-8",
+        )
+        (artifacts / "second.html").write_text("<title>Second</title><h1>Second</h1><p>Another page.</p>", encoding="utf-8")
+        self.app.state.storage.update_settings({"html_vault_root": str(artifacts)}, model_default="sonnet")
+        stub = """if (window.top === window) window.webkit = {messageHandlers: {
+            askwPick: {postMessage() { return Promise.resolve(null) }},
+            askwDrag: {postMessage() { window.__drags = (window.__drags || 0) + 1; return Promise.resolve(true) }},
+            askwChrome: {postMessage(m) { (window.__chrome = window.__chrome || []).push(m.pageOnly); return Promise.resolve(true) }}}}"""
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.add_init_script(stub)
+                    src = urllib.parse.quote(str(artifacts / "nav.html"))
+                    page.goto(f"{self.base_url}/vault?vault=html&src={src}", wait_until="networkidle")
+                    frame = page.frame_locator("#reader")
+                    frame.locator("#three h2").wait_for()
+                    group, side, outline = page.locator("#tab-bar .tab-group"), page.locator("#vault-side"), page.locator("#outline-side")
+                    pill, toggle = frame.locator(".askw-pill"), page.locator("#outline-toggle")
+                    pill.wait_for()
+                    # A second page open behind, in a tab of its own.
+                    page.evaluate("h => openTab(h, {kind: 'html', background: true})", f"/view?src={urllib.parse.quote(str(artifacts / 'second.html'))}")
+                    behind = page.locator("#stage > iframe:not(#reader)")
+                    behind.wait_for(state="attached")
+                    page.wait_for_function("() => { const f = document.querySelector('#stage > iframe:not(#reader)'); return f && f.contentDocument && f.contentDocument.querySelector('.askw-pill') }")
+
+                    def link_centre() -> tuple[float, float]:
+                        box = frame.locator("nav a", has_text="THREE").bounding_box()
+                        return box["x"] + box["width"] / 2, box["y"] + box["height"] / 2
+
+                    def drags() -> int:
+                        return page.evaluate("() => window.__drags || 0")
+
+                    def page_only() -> bool:
+                        return page.evaluate("() => document.body.classList.contains('page-only')")
+
+                    # The clash: resting on a link in the page's nav brings the tab bar's card out over it.
+                    x, y = link_centre()
+                    self.assertLess(y, 24)
+                    page.mouse.move(x, 300)
+                    page.mouse.move(x, y)
+                    expect(group).to_be_visible()
+                    self.assertEqual(page.evaluate("([x, y]) => !!document.elementFromPoint(x, y).closest('#tab-bar')", [x, y]), True)
+                    page.mouse.move(x, 400)
+                    expect(group).to_be_hidden()
+                    reader_before = page.locator("#reader").bounding_box()
+                    self.assertGreater(reader_before["x"], 0)
+                    # The nav's empty space, in the title band, drags the window.
+                    page.mouse.click(reader_before["x"] + 40, 10)
+                    page.wait_for_timeout(50)
+                    self.assertEqual(drags(), 1)
+
+                    # ⌘B in the page: the reader is the whole window, the panels and the toggle are gone, the widget's
+                    # buttons with them, in the page showing and the one behind, and the app is told.
+                    frame.locator("body").press("Meta+b")
+                    self.assertTrue(page_only())
+                    self.assertEqual(page.locator("#reader").bounding_box(), {"x": 0, "y": 0, "width": 1200, "height": 760})
+                    for chrome in (side, outline, toggle, group):
+                        expect(chrome).to_be_hidden()
+                    expect(pill).to_be_hidden()
+                    self.assertTrue(frame.locator("html").evaluate("h => h.hasAttribute('data-askw-page-only')"))
+                    self.assertTrue(behind.evaluate("f => f.contentDocument.documentElement.hasAttribute('data-askw-page-only')"))
+                    self.assertEqual(page.evaluate("() => window.__chrome"), [True])
+
+                    # Nothing comes out: not the tab bar over the nav, not the outline at the right edge.
+                    x, y = link_centre()
+                    page.mouse.move(x, 300)
+                    page.mouse.move(x, y)
+                    page.wait_for_timeout(300)
+                    expect(group).to_be_hidden()
+                    page.mouse.move(1195, 300)
+                    page.wait_for_timeout(300)
+                    expect(outline).to_be_hidden()
+                    # The link takes its click, and the band's empty space no longer drags the window.
+                    page.mouse.click(x, y)
+                    page.wait_for_function("() => document.querySelector('#reader').contentWindow.location.hash === '#three'")
+                    before = drags()
+                    page.mouse.click(40, 10)
+                    page.wait_for_timeout(50)
+                    self.assertEqual(drags(), before)
+                    # The widget's buttons stay away for a selection, but the right-click menu still answers.
+                    frame.locator("#three p").select_text()
+                    frame.locator("#three p").dispatch_event("mouseup")
+                    page.wait_for_timeout(250)
+                    expect(frame.locator(".askw-trigger")).to_be_hidden()
+                    frame.locator("#three p").click(button="right")
+                    expect(frame.locator(".askw-menu")).to_be_visible()
+                    page.keyboard.press("Escape")
+
+                    # ⌘B typed into rich text is the page's; the keys still reach the tabs. A page that opens while the
+                    # window is page only starts without its buttons.
+                    frame.locator("#ed").focus()
+                    frame.locator("#ed").press("Meta+b")
+                    self.assertTrue(page_only())
+                    frame.locator("#ed").evaluate("e => e.blur()")
+                    frame.locator("body").press("Meta+2")
+                    page.frame_locator("#reader").locator("h1", has_text="Second").wait_for()
+                    expect(page.frame_locator("#reader").locator(".askw-pill")).to_be_hidden()
+                    page.evaluate("h => navigate(h)", f"/view?src={src}")
+                    page.frame_locator("#reader").locator("#three h2").wait_for()
+                    self.assertTrue(page.frame_locator("#reader").locator("html").evaluate("h => h.hasAttribute('data-askw-page-only')"))
+                    expect(page.frame_locator("#reader").locator(".askw-pill")).to_be_hidden()
+                    page.frame_locator("#reader").locator("nav").click(position={"x": 10, "y": 10})
+
+                    # Out again by the app's View ▸ Page Only: everything back as it was.
+                    page.evaluate("() => onyxShell.togglePageOnly()")
+                    self.assertFalse(page_only())
+                    expect(side).to_be_visible()
+                    expect(toggle).to_be_visible()
+                    expect(page.frame_locator("#reader").locator(".askw-pill")).to_be_visible()
+                    self.assertEqual(page.locator("#reader").bounding_box(), reader_before)
+                    self.assertEqual(page.evaluate("() => window.__chrome"), [True, False])
+                    self.assertEqual(page.evaluate("() => document.body.classList.contains('outline-out')"), False)
+
+                    # Pinned panels go too, at once, and come back where they were, still pinned.
+                    page.frame_locator("#reader").locator("body").press("Meta+Alt+Backslash")
+                    page.frame_locator("#reader").locator("body").press("Meta+Shift+Backslash")
+                    expect(page.locator("#tab-pin")).to_have_attribute("aria-pressed", "true")
+                    expect(page.locator("#outline-pin")).to_have_attribute("aria-pressed", "true")
+                    page.wait_for_timeout(400)
+                    pinned = page.locator("#reader").bounding_box()
+                    page.evaluate("() => { window.__runs = []; document.addEventListener('transitionrun', e => {"
+                                  " if (e.target.matches('.shell,#reader-pane')) __runs.push(e.propertyName) }, true) }")
+                    page.frame_locator("#reader").locator("body").press("Meta+b")
+                    self.assertEqual(page.locator("#reader").bounding_box(), {"x": 0, "y": 0, "width": 1200, "height": 760})
+                    expect(outline).to_be_hidden()
+                    expect(page.locator("#tab-bar")).to_be_hidden()
+                    page.frame_locator("#reader").locator("body").press("Meta+b")
+                    self.assertEqual(page.locator("#reader").bounding_box(), pinned)
+                    expect(outline).to_be_visible()
+                    expect(group).to_be_visible()
+                    expect(page.locator("#tab-pin")).to_have_attribute("aria-pressed", "true")
+                    self.assertEqual(page.evaluate("() => __runs"), [])
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_modified_clicks_keys_and_outside_opens_reach_the_tabs(self) -> None:
         # ⌘-click and a middle click on a link to a page open a tab, in the shell and inside a page, and leave the tab
         # showing where it was; left to the browser they asked for a window, which the app loaded over the shell.

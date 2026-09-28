@@ -160,6 +160,9 @@
     '.askw-pill:hover b,.askw-pill:focus-visible b,.askw-pill[aria-expanded="true"] b{max-width:180px;margin-left:6px;opacity:1;}',
     'html[data-askw-page="dark"] .askw-pill{--askw-glass:rgba(22,22,22,.24);--askw-frost:rgba(30,30,30,.74);border-color:rgba(255,255,255,.14);box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);color:#cdcdcd;}',
     'html[data-askw-page="dark"] .askw-pill b{color:#fff;}',
+    // Page Only (⌘B in Onyx, initPageOnly): the page alone. Its buttons go; the
+    // right-click menu and ⌘⇧A stay, since they show only when called.
+    'html[data-askw-page-only] .askw-pill,html[data-askw-page-only] .askw-chats,html[data-askw-page-only] .askw-trigger{display:none!important;}',
     // The page's chats rest in the corner opposite the pill: a bubble and how many
     // there are, which opens a list of them. Its glass takes the page's tone like
     // the pill's, but frosted from the start, since it always carries a number.
@@ -2481,8 +2484,19 @@
     });
   }
 
+  // A page that starts in Onyx's reader while the shell is in Page Only is marked
+  // before anything is drawn, so its buttons never show for a frame. The shell
+  // marks and unmarks the pages already open as ⌘B toggles it (vault_ui.py).
+  function initPageOnly() {
+    try {
+      var shell = window.frameElement && window.parent.onyxShell;
+      if (shell && shell.pageOnly && shell.pageOnly()) document.documentElement.setAttribute('data-askw-page-only', '');
+    } catch (e) {}
+  }
+
   // ============================================================ boot
   function boot() {
+    initPageOnly();
     injectStyle();
     guardTransparentCanvas();
     seedLook();

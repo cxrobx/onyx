@@ -310,6 +310,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     private let glass = WindowGlass()
     private var swipeCover: SwipeCover?
     private var swipeCoverDeadline: DispatchWorkItem?
+    private var pageOnlyItem: NSMenuItem?
     private var dockArtifacts: [DockRecentItem] = []
     private var dockNotes: [DockRecentItem] = []
     private var dockRefreshTimer: Timer?
@@ -886,6 +887,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         configuration.userContentController.addScriptMessageHandler(
             self, contentWorld: .page, name: "askwPainted"
         )
+        configuration.userContentController.addScriptMessageHandler(
+            self, contentWorld: .page, name: "askwChrome"
+        )
         // WebKit does not consistently expose the Clipboard API to localhost
         // pages. Give interactive local HTML a browser-compatible writeText()
         // backed by the native pasteboard. The message handler replies with a
@@ -1071,6 +1075,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             replyHandler(true, nil)
             return
         }
+        if message.name == "askwChrome" {
+            // The shell went in or out of Page Only (⌘B, vault_ui.py). A page in the reader frame has no say.
+            if message.frameInfo.isMainFrame { showPageOnly(body["pageOnly"] as? Bool == true) }
+            replyHandler(true, nil)
+            return
+        }
         if message.name == "askwAppearance" {
             // Only the shell page sets the window's appearance: a document in the reader frame, asking for the
             // app theme, would otherwise undo the vault look's mode.
@@ -1215,6 +1225,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         return nil
     }
 
+    /// A new page in the window starts with its chrome: Page Only is the shell's, and not remembered, so a shell that
+    /// loads again (Reload, a view switch that loads) comes back with none of it, and the traffic lights must too.
+    func webView(_ webView: WKWebView, didCommit navigation: WKNavigation!) {
+        showPageOnly(false)
+    }
+
+    /// Page Only (⌘B): the page is the whole window, so the traffic lights go too and its top-left corner takes clicks.
+    /// The shell hides everything else; the item's check mark follows whichever way it was toggled.
+    private func showPageOnly(_ on: Bool) {
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            window?.standardWindowButton(kind)?.isHidden = on
+        }
+        pageOnlyItem?.state = on ? .on : .off
+    }
+
     /// WebKit's private navigation-delegate call, made as a swipe's slide ends and before it navigates; `item` is nil
     /// when the swipe was abandoned. What is on screen then is WebKit's snapshot of the destination, fully in.
     @objc(_webViewDidEndNavigationGesture:withNavigationToBackForwardListItem:)
@@ -1353,6 +1378,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     /// View ▸ Toggle Editing (⌘E): a Markdown page in the reader turns into its editor and back, as Obsidian's ⌘E does.
     /// ⌘E typed in the page or the sidebar is taken there first (ask.js, vault_ui.py); this serves a click.
     @objc private func toggleEditing() { onShell("onyxShell.edit()") }
+    /// View ▸ Page Only (⌘B): the page alone in the window, and back. ⌘B typed in the page or the shell is taken there
+    /// first (vault_ui.py), and in the editor it stays bold; this serves a click.
+    @objc private func togglePageOnly() { onShell("onyxShell.togglePageOnly()") }
     @objc private func openFind() { findInPage("open") }
     @objc private func findNext() { findInPage("next") }
     @objc private func findPrevious() { findInPage("previous") }
@@ -1572,6 +1600,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         viewItem.submenu = viewMenu
         viewMenu.addItem(menuItem("Reload", #selector(reload), "r"))
         viewMenu.addItem(menuItem("Toggle Editing", #selector(toggleEditing), "e"))
+        let pageOnly = menuItem("Page Only", #selector(togglePageOnly), "b")
+        pageOnlyItem = pageOnly
+        viewMenu.addItem(pageOnly)
         viewMenu.addItem(.separator())
         viewMenu.addItem(menuItem("Zoom In", #selector(zoomIn), "+"))
         viewMenu.addItem(menuItem("Zoom Out", #selector(zoomOut), "-"))
