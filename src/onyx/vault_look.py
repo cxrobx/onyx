@@ -34,6 +34,8 @@ MIN_INK_CONTRAST = 4.5
 MIN_ACCENT_CONTRAST = 3.0
 # Onyx's own red: the glow on the rim of the logo's stone (launcher/onyx-gem.png), its commonest bright red.
 ONYX_RED: RGB = (240.0, 0.0, 0.0)
+# Onyx's own blue (ask.js --askw-glass-accent): a page with no link to measure keeps it, where it reads on the ground.
+ONYX_BLUE = "rgb(58, 131, 247)"
 
 
 def _parse(value: Any) -> tuple[RGB, float] | None:

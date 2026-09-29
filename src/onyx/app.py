@@ -1646,7 +1646,7 @@ def create_app(config: AppConfig) -> FastAPI:
                   if isinstance(value := body.get(key), str) and len(value) <= 128}
         look = vault_look.palette({"styles": {
             "content": {"background-color": colors.get("background"), "color": colors.get("ink")},
-            "a": {"color": colors.get("link")},
+            "a": {"color": colors.get("link") or vault_look.ONYX_BLUE},
         }}, None) if app.state.storage.settings().get("html_follow_page", True) else None
         return JSONResponse({"ok": True, "page": True, "mode": look["mode"] if look else None,
                              "base": look["base"] if look else None, "css": vault_look.stylesheet(look),

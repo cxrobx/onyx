@@ -175,6 +175,11 @@ class VaultLookApiTests(unittest.TestCase):
                 self.assertEqual(result["base"], [18, 20, 24])
                 self.assertIn("--accent:230 232 236", result["css"])
                 self.assertNotIn("--ui-font", result["css"])
+                # No link to measure: Onyx's own blue stays the accent wherever it reads (3:1), on cream and on black.
+                for ground in ("rgb(253, 246, 227)", "rgb(0, 0, 0)"):
+                    ink = "rgb(0, 0, 0)" if ground != "rgb(0, 0, 0)" else "rgb(255, 255, 255)"
+                    unlinked = client.post("/api/page-look", json={"token": config.token, "background": ground, "ink": ink}).json()
+                    self.assertIn("--accent:58 131 247", unlinked["css"])
                 invalid = [
                     ("rgba(0, 0, 0, .5)", colors["ink"]),
                     ("red;}</style><script>alert(1)</script>", colors["ink"]),
