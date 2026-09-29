@@ -40,6 +40,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "appearance_theme": "system",
     "markdown_follow_obsidian": True,
     "sidebar_follow_obsidian": True,
+    "html_follow_page": True,
     # Browsed read-only in Vault mode; "" disables the vault view.
     "vault_root": str(Path.home() / "Documents" / "CX"),
     # Artifacts: a folder of symlinks to HTML pages anywhere on disk; "" hides it.
@@ -313,6 +314,7 @@ class Storage:
             "allow_private_remote",
             "markdown_follow_obsidian",
             "sidebar_follow_obsidian",
+            "html_follow_page",
             "web_lookups",
             "setup_dismissed",
         ):

@@ -108,7 +108,7 @@ if(f===reader)readerLoaded();else if(!blank&&traversed(f)){activateTab(t);return
 function activateTab(t){if(!t||t===TABS.active||!TABS.list.includes(t))return;const was=TABS.active;if(was){was.kind=KIND;was.used=Date.now()}
 if(!t.frame)tabFrame(t,t.href);
 if(reader&&reader!==t.frame)reader.removeAttribute('id');for(const x of TABS.list)if(x.frame)x.frame.inert=x!==t;t.frame.id='reader';
-reader=t.frame;TABS.active=t;t.used=Date.now();
+reader=t.frame;TABS.active=t;t.used=Date.now();previewPageLook(t.href);
 if(t.kind&&t.kind!==KIND&&VAULTS[t.kind])switchVault(t.kind,true);
 if(t.loaded||!t.href)readerLoaded();else{showHome(false);empty.hidden=true;highlight(t.src)}
 evictTabs();tabsChanged()}

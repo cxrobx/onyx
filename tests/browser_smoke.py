@@ -1579,8 +1579,9 @@ class BrowserSmokeTests(unittest.TestCase):
             self.assertEqual(response.status, 200)
 
     def test_glass_icons_take_the_page_tone_not_the_app_theme(self) -> None:
-        # A dark app over a cream page (the usual Artifacts case) must get light
+        # With page matching off, a dark app over a cream page must get light
         # glass with dark ink there; dark glass would turn the icon into a smudge.
+        self.app.state.storage.update_settings({"html_follow_page": False}, model_default="sonnet")
         cream = self.root / "cream.html"
         cream.write_text(
             "<!doctype html><title>Cream</title><body style='background:#FDF6E3'><p>Cream page.</p></body>",
@@ -3355,6 +3356,103 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_html_page_colours_follow_the_visible_tab_and_restore_the_vault(self) -> None:
+        from tests.test_vault_look import solarized
+        storage = self.app.state.storage
+        vault = self.root / "looks"
+        vault.mkdir()
+        note = vault / "note.md"
+        note.write_text("# A note\n\nStill follows the vault.")
+        dark = vault / "dark.html"
+        dark.write_text("""<!doctype html><html><head><title>Page colours</title><style>
+          body {background:rgb(18,20,24);color:rgb(230,232,236);font-family:serif}
+          body.cream {background:rgb(250,240,215);color:rgb(40,35,30)}
+          body.picture {background-image:linear-gradient(black,white)}
+          body.clear {background:transparent}
+          body.faint {color:rgb(20,20,20)}
+          body.auto {background:rgb(250,240,215);color:rgb(40,35,30)}
+          @media(prefers-color-scheme:dark) {body.auto {background:rgb(18,20,24);color:rgb(230,232,236)}}
+          a {color:rgb(70,170,240)}
+          </style></head><body><h1>Page colours</h1><p>An HTML artifact.</p><a href='#more'>More</a></body></html>""")
+        markdown, sidebar = solarized()
+        storage.update_settings({"vault_root": str(vault), "html_vault_root": str(vault), "html_follow_page": True}, model_default="sonnet")
+        storage.save_markdown_theme(vault, markdown)
+        storage.save_sidebar_theme(vault, sidebar)
+        errors = []
+        with sync_playwright() as pw:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(pw, engine).launch()
+                    page = browser.new_page(viewport={"width": 1280, "height": 900})
+                    page.on("pageerror", lambda error: errors.append(str(error)))
+                    page.goto(self.base_url + "/?" + urllib.parse.urlencode({"src": str(dark)}))
+                    page.evaluate("document.documentElement.style.zoom='1.25'")
+                    def ground(value):
+                        page.wait_for_function("v => getComputedStyle(document.documentElement).getPropertyValue('--bg-primary').trim() === v", arg=value)
+                    ground("18 20 24")
+                    reader = page.frame(name="reader")
+                    expect(page.locator("body")).not_to_have_class(re.compile(r"\bobsidian-tree\b"))
+                    expect(reader.locator(".askw-panel")).to_have_css("background-color", "rgba(29, 31, 35, 0.97)")
+                    page.wait_for_timeout(200)  # allow the 150 ms colour transition to settle
+                    self.assertGreaterEqual(page.locator("#tree .file").first.evaluate(CONTRAST), 4.5)
+                    # A theme switch affects the shell and controls without touching the page font.
+                    reader.evaluate("document.body.className='cream'")
+                    ground("250 240 215")
+                    expect(reader.locator("body")).to_have_css("font-family", "serif")
+                    for invalid in ("picture", "clear", "faint"):
+                        reader.evaluate("c => document.body.className=c", invalid)
+                        ground("253 246 227")
+                        expect(page.locator("body")).to_have_class(re.compile(r"\bobsidian-tree\b"))
+                    reader.evaluate("document.body.className=''")
+                    ground("18 20 24")
+                    # A tab behind cannot change the window, even when its own theme changes.
+                    page.evaluate("href => openTab(href)", "/view?" + urllib.parse.urlencode({"src": str(note)}))
+                    ground("253 246 227")
+                    reader.evaluate("document.body.className='cream'")
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "light")
+                    ground("253 246 227")
+                    page.evaluate("activateTab(TABS.list[0])")
+                    ground("250 240 215")
+                    # The setting takes effect in place and keeps its value after reopening Settings.
+                    page.evaluate("PANELS.openSettings()")
+                    toggle = page.locator("#page-look-toggle")
+                    expect(toggle).to_be_checked()
+                    toggle.uncheck()
+                    ground("253 246 227")
+                    toggle.check()
+                    ground("250 240 215")
+                    page.locator("#settings-modal [data-close]").click()
+                    page.wait_for_timeout(200)
+                    page.screenshot(path=str(self.root / f"page-look-{engine}.png"))
+                    # Revisit while the fresh measurement is held: cached cream first,
+                    # then the page's current dark design when the response arrives.
+                    held = []
+                    page.route("**/api/page-look", lambda route: held.append(route))
+                    href = "/view?" + urllib.parse.urlencode({"src": str(dark)})
+                    page.evaluate("href => navigate(href)", "/view?" + urllib.parse.urlencode({"src": str(note)}))
+                    ground("253 246 227")
+                    page.frame_locator("#reader").locator("h1").filter(has_text="A note").wait_for()
+                    page.evaluate("href => navigate(href)", href)
+                    ground("250 240 215")
+                    page.frame_locator("#reader").locator("h1").filter(has_text="Page colours").wait_for()
+                    # A locator retry lets Playwright dispatch the held fetch.
+                    expect(page.frame_locator("#reader").locator("html")).to_have_attribute("data-askw-look", "light")
+                    page.wait_for_timeout(200)
+                    self.assertTrue(held)
+                    for route in held:
+                        route.continue_()
+                    page.unroute("**/api/page-look")
+                    ground("18 20 24")
+                    reader = page.frame(name="reader")
+                    reader.evaluate("document.body.className='auto'")
+                    page.emulate_media(color_scheme="light", reduced_motion="reduce")
+                    ground("250 240 215")
+                    expect(page.locator("body")).to_have_css("transition-duration", "0s")
+                    page.emulate_media(color_scheme="dark")
+                    ground("18 20 24")
+                    browser.close()
+        self.assertEqual(errors, [])
+
     def test_the_reader_and_the_answer_panel_wear_the_vault_look(self) -> None:
         # Match vault appearance dresses the reader too: a text page takes the vault's reading styles and the answer
         # panel its palette, in the vault's mode whatever the app theme says; off, they are Onyx's own again, live.
@@ -3449,8 +3547,9 @@ class BrowserSmokeTests(unittest.TestCase):
         with patch("onyx.app.stream_answer", canned), sync_playwright() as playwright:
             for engine in ("chromium", "webkit"):
                 browser = getattr(playwright, engine).launch(headless=True)
-                for mode, tone in (("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light")):
-                    with self.subTest(engine=engine, vault=mode, page=tone):
+                for mode, tone, follow in [(m, t, f) for f in (False, True) for m, t in (("dark", "light"), ("light", "dark"), ("dark", "dark"), ("light", "light"))]:
+                    with self.subTest(engine=engine, vault=mode, page=tone, follow_page=follow):
+                        storage.update_settings({"html_follow_page": follow}, model_default="sonnet")
                         storage.save_markdown_theme(vault, vaults[mode])
                         failing["now"] = False
                         ratios: dict[str, tuple[float, float]] = {}
@@ -3463,7 +3562,7 @@ class BrowserSmokeTests(unittest.TestCase):
                         page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
                         query = urllib.parse.urlencode({"src": str(pages[tone]), "folder": str(self.root)})
                         page.goto(f"{self.base_url}/view?{query}", wait_until="networkidle")
-                        expect(page.locator("html")).to_have_attribute("data-askw-look", mode)
+                        expect(page.locator("html")).to_have_attribute("data-askw-look", tone if follow else mode)
                         expect(page.locator("html")).to_have_attribute("data-askw-page", tone)
 
                         passage = page.locator("#passage")

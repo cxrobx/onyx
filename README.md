@@ -50,6 +50,11 @@ each step:
 Setup stops opening on its own once every step passes, or after you press
 **Don't open Setup on launch**. It stays in Settings either way.
 
+**Settings ▸ Appearance ▸ Match page appearance (HTML)** is on by default. The
+sidebar, tabs and answer panel follow the HTML page’s colours while keeping the
+interface font. Notes, image backgrounds and pages without readable solid colours
+keep the vault or Onyx appearance. Turn it off to keep that appearance everywhere.
+
 If you use Alfred, download
 [`Open-in-Onyx.alfredworkflow`](https://github.com/cxrobx/onyx/releases/latest/download/Open-in-Onyx.alfredworkflow) from the same
 release and double-click it. It adds `onx` and `onxc` search and an **Open in

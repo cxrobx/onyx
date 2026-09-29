@@ -108,7 +108,8 @@ PANELS_HTML = """<dialog id=settings-modal class="modal settings-modal" aria-lab
 <section class=set-sec aria-labelledby=set-appearance><h3 id=set-appearance>Appearance</h3><form id=appearance-form class=set-grid>
 <div class=field><label for=appearance-theme>Color theme</label><select id=appearance-theme name=appearance_theme><option value=system>System</option><option value=light>Light</option><option value=dark>Dark</option></select><p id=theme-follow class=field-help hidden>Following your vault while Match vault appearance is on.</p></div>
 <div class=field><label for=glass-transparency>Window transparency</label><input id=glass-transparency class=cx-slider name=glass_transparency type=range min=0 max=100 value="__GLASS__" style="--fill:__GLASS__%"><div class=glass-scale><span>Solid</span><strong id=glass-value>__GLASS__% glass</strong><span>Glass</span></div></div>
-<div class="field wide"><label class=check><input id=vault-look-toggle type=checkbox> Match vault appearance</label><p id=vault-look-status class=field-help>The whole app in your vault’s colours and font — the sidebar, these dialogs, your notes — shared by the Onyx Obsidian plugin.</p></div></form></section>
+<div class="field wide"><label class=check><input id=vault-look-toggle type=checkbox> Match vault appearance</label><p id=vault-look-status class=field-help>The whole app in your vault’s colours and font — the sidebar, these dialogs, your notes — shared by the Onyx Obsidian plugin.</p></div>
+<div class="field wide"><label class=check><input id=page-look-toggle name=html_follow_page type=checkbox> Match page appearance (HTML)</label><p class=field-help>Use the HTML page’s colours around it. Notes and pages without a clear background keep your usual look.</p></div></form></section>
 <section class=set-sec aria-labelledby=set-answers><h3 id=set-answers>Answers</h3><form id=answers-form class=set-grid>
 <div class=field><label for=provider>Subscription provider</label><select id=provider name=provider><option value=claude>Claude</option><option value=codex>Codex</option></select></div>
 <div class=field><label id=model-label for=model>Model</label><select id=model><option>Loading models…</option></select></div>
@@ -150,7 +151,7 @@ for(const dlg of [settingsDlg,historyDlg]){dlg.addEventListener('click',e=>{if(e
 const forms=['appearance-form','answers-form','vault-form','privacy-form'].map(id=>$('#'+id));let SETTINGS={},PROVIDERS=null;
 function fillForm(form,s){for(const e of form.elements)if(e.name&&s[e.name]!==undefined){if(e.type==='checkbox')e.checked=!!s[e.name];else e.value=s[e.name]}}
 function valueOf(e){return e.type==='checkbox'?e.checked:(e.type==='number'||e.type==='range'?Number(e.value):e.value)}
-function applyTheme(raw){const theme=['light','dark'].includes(raw)?raw:'system';document.documentElement.dataset.theme=theme;$('#appearance-theme').value=theme;const h=native&&window.webkit.messageHandlers.askwAppearance;if(h)Promise.resolve(h.postMessage({theme:GLASS.vault?GLASS.vault.mode:theme})).catch(()=>{});paintGlass()}
+function applyTheme(raw){const theme=['light','dark'].includes(raw)?raw:'system';document.documentElement.dataset.theme=theme;$('#appearance-theme').value=theme;syncAppearance();paintGlass()}
 GLASS.onchange=()=>{const pct=Math.round(GLASS.t*100),s=$('#glass-transparency');s.value=pct;s.style.setProperty('--fill',pct+'%');$('#glass-value').textContent=GLASS.reduce?'Reduce Transparency is on':pct+'% glass'};
 function effortLabel(v){return({low:'Low',medium:'Medium',high:'High',xhigh:'Extra high',max:'Maximum',ultra:'Ultra'})[v]||v}
 function renderEfforts(provider,catalog,model){const field=$('#reasoning-effort'),info=(catalog.models||[]).find(x=>x.id===model)||{},saved=SETTINGS[provider+'_effort']||catalog.selected_effort||info.default_effort||'medium';const efforts=(info.efforts||[]).length?info.efforts.slice():[saved];field.name=provider+'_effort';field.innerHTML=efforts.map(v=>`<option value="${esc(v)}">${esc(effortLabel(v))}</option>`).join('');field.value=efforts.includes(saved)?saved:(efforts.includes(info.default_effort)?info.default_effort:efforts[0])}
@@ -161,6 +162,7 @@ async function commit(el){if(!el.name||!el.form)return;if(el.type==='number'&&!e
 const patch={[el.name]:valueOf(el)};if(el.id==='provider')renderProvider(el.value);if(el.id==='model')describeModel($('#provider').value);if(el.id==='provider'||el.id==='model'){const m=$('#model'),f=$('#reasoning-effort');if(m.value)patch[m.name]=m.value;if(f.value)patch[f.name]=f.value}
 try{SETTINGS=(await send('/api/settings','POST',{settings:patch})).settings}catch(e){say(e.message,'bad');revert(el.form);return}
 if('vault_root' in patch||'html_vault_root' in patch){refreshRoots();reloadTrees();syncSidebarTheme(true);loadSetup()}
+if('html_follow_page' in patch)await syncSidebarTheme(true);
 if(el.form.id!=='appearance-form')say('Saved')}
 for(const form of forms){form.addEventListener('submit',e=>e.preventDefault());form.addEventListener('change',e=>{if(e.target.id==='appearance-theme')applyTheme(e.target.value);commit(e.target)})}
 $('#glass-transparency').addEventListener('input',e=>setGlass(e.target.value));
@@ -171,7 +173,7 @@ $('#roots').addEventListener('click',async e=>{const b=e.target.closest('[data-r
 $('#add-root').onclick=async()=>{try{const p=await window.webkit.messageHandlers.askwPick.postMessage({kind:'folder',initial:''});if(p){renderRoots((await send('/api/roots','POST',{path:p})).roots);say('Allowed folder added')}}catch(e){say(e.message,'bad')}};
 // One switch for the whole vault look: the reading styles and the explorer's look are its two settings, set together.
 async function lookStatus(){try{const [l,t]=await Promise.all([getJSON('/api/vault-look'),getJSON('/api/sidebar-theme')]),sync=t.last_sync;$('#vault-look-status').textContent=!l.enabled?'Using Onyx’s own look.':sync&&!sync.ok?'Obsidian’s look was refused: '+sync.error:l.available?'Following your vault. Updates automatically while Obsidian is open.':'Waiting for Obsidian. Enable the Onyx plugin in your configured vault; after updating it, turn it off and on in Obsidian ▸ Settings ▸ Community plugins.'}catch(e){}}
-function syncThemeControl(){const on=document.documentElement.classList.contains('vault-look');$('#appearance-theme').disabled=on;$('#theme-follow').hidden=!on}
+function syncThemeControl(){const on=!!LOOK.css;$('#appearance-theme').disabled=on;$('#theme-follow').hidden=!on}
 document.addEventListener('onyx:look',()=>{syncThemeControl();if(settingsDlg.open)lookStatus()});syncThemeControl();
 $('#vault-look-toggle').addEventListener('change',async e=>{const on=e.target.checked;try{SETTINGS=(await send('/api/settings','POST',{settings:{markdown_follow_obsidian:on,sidebar_follow_obsidian:on}})).settings}catch(err){say(err.message,'bad');e.target.checked=!on;return}await syncSidebarTheme(true);lookStatus()});
 // The model catalog asks both CLIs, so it is fetched once per page; the settings themselves every time the dialog opens.

@@ -161,6 +161,34 @@ class VaultLookTests(unittest.TestCase):
 
 
 class VaultLookApiTests(unittest.TestCase):
+    def test_page_look_is_a_bounded_colour_calculation_with_the_usual_access_checks(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            config = AppConfig(default_folder=root, allowed_roots=(root,), port=8899, data_dir=root / "data")
+            with TestClient(create_app(config), base_url="http://127.0.0.1:8899") as client:
+                colors = {"background": "rgb(18, 20, 24)", "ink": "rgb(230, 232, 236)", "link": "rgb(23, 24, 25)"}
+                self.assertEqual(client.post("/api/page-look", json=colors).status_code, 403)
+                colors["token"] = config.token
+                self.assertEqual(client.post("/api/page-look", json=colors, headers={"Origin": "https://evil.example"}).status_code, 403)
+                result = client.post("/api/page-look", json=colors).json()
+                self.assertEqual(result["mode"], "dark")
+                self.assertEqual(result["base"], [18, 20, 24])
+                self.assertIn("--accent:230 232 236", result["css"])
+                self.assertNotIn("--ui-font", result["css"])
+                invalid = [
+                    ("rgba(0, 0, 0, .5)", colors["ink"]),
+                    ("red;}</style><script>alert(1)</script>", colors["ink"]),
+                    (colors["background"], "rgb(20, 20, 20)"),
+                    ({}, []), ("rgb(., 20, 30)", colors["ink"]),
+                ]
+                for background, ink in invalid:
+                    bad = client.post("/api/page-look", json={**colors, "background": background, "ink": ink}).json()
+                    self.assertEqual(bad["css"], "")
+                self.assertTrue(client.get("/api/settings").json()["settings"]["html_follow_page"])
+                client.post("/api/settings", json={"token": config.token, "settings": {"html_follow_page": False}})
+                self.assertFalse(client.get("/api/vault-look").json()["page_enabled"])
+                self.assertEqual(client.post("/api/page-look", json=colors).json()["css"], "")
+
     def test_the_shell_wears_the_vault_look_from_the_first_paint_while_the_switch_is_on(self):
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp)

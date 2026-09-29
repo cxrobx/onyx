@@ -42,9 +42,12 @@ def _parse(value: Any) -> tuple[RGB, float] | None:
     match = _RGBA.match(value.strip())
     if not match:
         return None
-    rgb = tuple(min(255.0, max(0.0, float(part))) for part in match.groups()[:3])
-    raw_alpha = match.group(4)
-    alpha = 1.0 if raw_alpha is None else float(raw_alpha.rstrip("%")) / (100 if raw_alpha.endswith("%") else 1)
+    try:
+        rgb = tuple(min(255.0, max(0.0, float(part))) for part in match.groups()[:3])
+        raw_alpha = match.group(4)
+        alpha = 1.0 if raw_alpha is None else float(raw_alpha.rstrip("%")) / (100 if raw_alpha.endswith("%") else 1)
+    except ValueError:
+        return None
     return rgb, min(1.0, max(0.0, alpha))  # type: ignore[return-value]
 
 

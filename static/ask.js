@@ -36,7 +36,8 @@
   var recentFolders = [];
   var serverConfig = { version: 'unknown', provider: 'claude', model: 'sonnet', reasoning_effort: 'medium', cache_ttl_hours: 168, cache_max_entries: 100 };
   var appearanceTheme = 'system';
-  var vaultLook = null;  // Match vault appearance: {mode, reader_css} while the app wears the vault
+  var nativeLook = null;
+  var vaultLook = null;  // The controls’ current palette: page colours when available, otherwise the vault.
   var sel = null;              // { text, context, rect }
   var rightClickSelection = null; // whether the press began on an existing selection
   var abort = null;            // AbortController for the active stream
@@ -1881,13 +1882,15 @@
     document.documentElement.setAttribute('data-askw-color', effective);
     applyPageTone();
     var bridge = window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.askwAppearance;
-    if (bridge) Promise.resolve(bridge.postMessage({ theme: vaultLook ? vaultLook.mode : appearanceTheme })).catch(function () {});
+    // Page colours must not drive prefers-color-scheme back into the page.
+    if (bridge && window.top === window) Promise.resolve(bridge.postMessage({ theme: nativeLook ? nativeLook.mode : appearanceTheme })).catch(function () {});
   }
 
   // Glass chips lie on the page, so they take the page's tone — a dark app over a
   // cream page still gets light glass. The first opaque background wins (body,
   // then html); a transparent page shows the app's pane, so the app theme stands in.
   function pageTone() {
+    if (vaultLook && vaultLook.page) return vaultLook.mode;
     var layers = [document.body, document.documentElement];
     for (var i = 0; i < layers.length; i++) {
       var m = layers[i] && /^rgba?\(([^)]*)\)/.exec(getComputedStyle(layers[i]).backgroundColor);
@@ -1959,6 +1962,7 @@
   // (vault_look.reader_stylesheet), on html[data-askw-look], after this file's own. Kept live like the reading styles.
   function applyVaultLook(look) {
     var css = (look && look.reader_css) || '';
+    if (look && look.page && nativeLook) css = (nativeLook.reader_css || '') + '\n' + css;
     var style = document.getElementById('askw-vault-look');
     if (!style) {
       style = document.createElement('style');
@@ -1980,20 +1984,91 @@
     // and win by coming later.
     (document.head || document.documentElement).appendChild(style);
     vaultLook = { mode: mode, reader_css: style.textContent };
+    nativeLook = vaultLook;
     document.documentElement.setAttribute('data-askw-look', mode);  // set already, unless the page has no <html> tag
   }
   function initVaultLook() {
-    var pending = false, revision = metaValue('askw-look-revision') || null;
+    var base = vaultLook || {}, enabled = metaValue('askw-page-enabled') !== 'false';
+    var html = ['html', 'remote-html'].indexOf(metaValue('askw-kind')) >= 0, pending = false, timer = 0, last = '', generation = 0;
+    var pageLook = null;
+    function publish(look) {
+      window.askwPageLook = look && look.css ? look : null;
+      applyVaultLook(window.askwPageLook || base);
+      try { if (window.parent !== window && window.parent.onyxPageLook) window.parent.onyxPageLook(window, window.askwPageLook); } catch (e) {}
+    }
+    // Never sample the injected controls. Images/gradients and translucent canvas
+    // layers have no single reliable ground, so they deliberately keep the vault.
+    function measure() {
+      var body = getComputedStyle(document.body), root = getComputedStyle(document.documentElement);
+      if (body.backgroundImage !== 'none' || root.backgroundImage !== 'none') return null;
+      function alpha(c) {
+        var m = /^rgba?\(([^)]*)\)$/.exec(c);
+        if (!m) return -1;
+        var p = m[1].split(/[\s,\/]+/).map(Number);
+        return p.length > 3 ? p[3] : 1;
+      }
+      var a = alpha(body.backgroundColor), ground = a >= .99 ? body.backgroundColor
+        : a === 0 && alpha(root.backgroundColor) >= .99 ? root.backgroundColor : null;
+      if (!ground) return null;
+      var links = document.querySelectorAll('a[href]'), link = '';
+      for (var i = 0; i < Math.min(links.length, 100); i++) {
+        if (!links[i].closest('.askw-root') && links[i].getClientRects().length) { link = getComputedStyle(links[i]).color; break; }
+      }
+      return { background: ground, ink: body.color, link: link };
+    }
+    function sample() {
+      window.clearTimeout(timer); timer = 0;
+      var colors = html && enabled ? measure() : null, key = JSON.stringify(colors);
+      if (key === last) return;
+      last = key;
+      var own = ++generation;
+      if (!colors) { pageLook = null; publish(null); return; }
+      fetch(SERVER + '/api/page-look', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(Object.assign({ token: TOKEN }, colors)) }).then(function (r) {
+        if (!r.ok) throw new Error('Page look unavailable');
+        return r.json();
+      }).then(function (look) {
+        if (own !== generation) return;
+        // A page may have changed while its palette was being calculated.
+        if (JSON.stringify(html && enabled ? measure() : null) !== key) { last = ''; schedule(); return; }
+        pageLook = look.css ? look : null;
+        publish(pageLook);
+      }).catch(function () { if (own === generation) { last = ''; pageLook = null; publish(null); } });
+    }
+    function schedule() { if (!timer) timer = window.setTimeout(sample, 150); }
+    function accept(look) {
+      var changed = enabled !== (look.page_enabled !== false), restyled = base.revision !== look.revision;
+      enabled = look.page_enabled !== false; base = look;
+      nativeLook = base.css || base.reader_css ? base : null;
+      if (changed) { last = ''; ++generation; pageLook = null; }
+      if (changed || restyled) publish(pageLook);
+      sample();
+    }
+    // The shell pushes settings immediately, including into tabs behind this one.
+    window.askwRefreshLook = accept;
     function refresh() {
       if (pending || document.hidden) return;
       pending = true;
       fetch(SERVER + '/api/vault-look', { cache: 'no-store' }).then(function (r) {
         if (!r.ok) throw new Error('Look unavailable');
         return r.json();
-      }).then(function (look) {
-        if (look.revision !== revision) { revision = look.revision; applyVaultLook(look); }
-      }).catch(function () { /* Keep the last good look while offline, or none on a page that may not ask. */ })
+      }).then(accept).catch(function () {})
         .finally(function () { pending = false; });
+    }
+    if (html) {
+      var observer = new MutationObserver(schedule);
+      [document.documentElement, document.body].forEach(function (el) {
+        observer.observe(el, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-mode', 'data-color-scheme'] });
+      });
+      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', schedule);
+      window.addEventListener('load', schedule);
+      window.addEventListener('pageshow', schedule);
+      // Theme transitions settle after the attribute changed; poll also catches
+      // replaced stylesheets without observing the widget's own DOM mutations.
+      window.setInterval(schedule, 3000);
+      try { if (enabled && window.parent !== window && window.parent.onyxCachedPageLook) pageLook = window.parent.onyxCachedPageLook(location.href); } catch (e) {}
+      if (pageLook) publish(pageLook);
+      sample();
     }
     refresh();
     window.setInterval(refresh, 3000);

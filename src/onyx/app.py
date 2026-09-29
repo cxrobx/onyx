@@ -545,7 +545,7 @@ def create_app(config: AppConfig) -> FastAPI:
             asset_token=capability,
             allow_document_scripts=interactive_local_html,
         )
-        out = first_paint(out, doc_src, settings, shown=shown if kind == "markdown" else None)
+        out = first_paint(out, doc_src, settings, kind=kind, shown=shown if kind == "markdown" else None)
         caps: OrderedDict = app.state.asset_caps
         caps[capability] = {
             "assets": assets,
@@ -1590,18 +1590,22 @@ def create_app(config: AppConfig) -> FastAPI:
             if root else None
         )
         worn = look if enabled else None
-        return {"ok": True, "enabled": enabled, "available": look is not None,
+        return {"ok": True, "enabled": enabled, "page_enabled": bool(settings.get("html_follow_page", True)),
+                "available": look is not None,
                 "mode": worn["mode"] if worn else None, "base": worn["base"] if worn else None,
                 "css": vault_look.stylesheet(worn), "reader_css": vault_look.reader_stylesheet(worn),
                 "revision": vault_look.revision(worn)}
 
     # A page comes already as it will look, and knowing where the reader left it, so nothing about it changes after its
     # first frame: the vault look's stylesheet, and its mode on <html> (its rules key on html[data-askw-look]); the app
-    # theme; the remembered scroll position. ask.js takes each at boot (seedLook, initPosition) instead of fetching it and
+    # theme; the remembered scroll position. HTML may then override the controls with its measured page colours.
+    # ask.js takes the baseline at boot (seedLook, initPosition) instead of fetching it and
     # restyling or jumping once the page had painted, which made every change of page look jerky.
-    def first_paint(html_text: str, source: str, settings: dict, *, shown: str | None = None) -> str:
+    def first_paint(html_text: str, source: str, settings: dict, *, kind: str = "", shown: str | None = None) -> str:
         look, row = current_vault_look(), app.state.storage.document(source)
-        head = (f'<meta name="askw-appearance" content="{_esc(str(settings.get("appearance_theme") or "system"))}">'
+        head = (f'<meta name="askw-page-enabled" content="{str(bool(settings.get("html_follow_page", True))).lower()}">'
+                f'<meta name="askw-kind" content="{_esc(kind)}">'
+                f'<meta name="askw-appearance" content="{_esc(str(settings.get("appearance_theme") or "system"))}">'
                 f'<meta name="askw-scroll" content="{float(row["scroll_y"]) if row else 0.0:g}">')
         if shown:
             head += f'<meta name="askw-doc-sig" content="{_esc(shown)}">'
@@ -1625,6 +1629,29 @@ def create_app(config: AppConfig) -> FastAPI:
         return JSONResponse(current_vault_look(), headers={
             **cors(request.headers.get("origin")), "Cache-Control": "no-store",
         })
+
+    @app.post("/api/page-look")
+    async def page_look_api(request: Request):
+        # A pure colour calculation: no paths, document reads, or saved theme. Only
+        # bounded RGB values enter the existing contrast-checked palette builder.
+        if denied := api_forbidden(request):
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+        if not isinstance(body, dict) or body.get("token") != config.token:
+            return JSONResponse({"ok": False, "error": "invalid token"}, status_code=403)
+        colors = {key: value for key in ("background", "ink", "link")
+                  if isinstance(value := body.get(key), str) and len(value) <= 128}
+        look = vault_look.palette({"styles": {
+            "content": {"background-color": colors.get("background"), "color": colors.get("ink")},
+            "a": {"color": colors.get("link")},
+        }}, None) if app.state.storage.settings().get("html_follow_page", True) else None
+        return JSONResponse({"ok": True, "page": True, "mode": look["mode"] if look else None,
+                             "base": look["base"] if look else None, "css": vault_look.stylesheet(look),
+                             "reader_css": vault_look.reader_stylesheet(look), "revision": vault_look.revision(look)},
+                            headers={**cors(request.headers.get("origin")), "Cache-Control": "no-store"})
 
     @app.post("/api/settings")
     async def update_settings_api(request: Request):

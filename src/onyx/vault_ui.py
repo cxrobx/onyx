@@ -121,7 +121,7 @@ def vault_page(
     # The vault's Obsidian file-explorer look (sidebar_theme), in force only when it has CSS.
     sidebar = sidebar or {}
     sidebar_css = sidebar.get("css") or ""
-    sidebar_state = json.dumps({"revision": sidebar.get("revision", ""), "folders": sidebar.get("folders", [])}).replace("<", "\\u003c")
+    sidebar_state = json.dumps({"revision": sidebar.get("revision", ""), "folders": sidebar.get("folders", []), "css": sidebar_css}).replace("<", "\\u003c")
     body_class = f"kind-{kind}" + (" obsidian-tree" if sidebar_css else "")
     labels = VAULT_LABELS[kind]
     version = html.escape(__version__)
@@ -129,7 +129,7 @@ def vault_page(
     # The whole app in the vault's colours (vault_look), while Match vault appearance is on and the plugin has measured it.
     look = look or {}
     look_css = look.get("css") or ""
-    look_state = json.dumps({"revision": look.get("revision", ""), "mode": look.get("mode"), "base": look.get("base")})
+    look_state = json.dumps(look).replace("<", "\\u003c")
     html_class = ' class="vault-look"' if look_css else ""
     glass_js = glass_script(settings, vault=look if look_css else None)
     initial = html.escape(f"/view?{reader_query}", quote=True) if reader_query else "about:blank"
@@ -345,6 +345,7 @@ body.page-still .shell,body.page-still #reader-pane{{transition:none!important}}
 {search_css}
 {find_css}
 {tabs_css}
+@media(prefers-reduced-motion:no-preference){{body{{transition:background-color 150ms,color 150ms}}#vault-side{{transition:background-color 150ms,color 150ms}}}}
 </style><style id=sidebar-theme>{sidebar_css}</style><style id=vault-look>{look_css}</style></head><body class="{body_class}"><div class=shell><aside id=vault-side data-drag><div class=brand><img class=mark src=/onyx-mark.png alt=""><span class=brand-name>{vault_name}</span>{add_toggle}<button id=side-pin class=side-toggle type=button aria-pressed=true title="Unpin sidebar (⌘\\)" aria-label="Pin sidebar" aria-controls=vault-side>{PIN_ICON}</button></div>
 <nav class=vault-switch aria-label="Library and vaults"><a href="/"{library_active} data-kind=library>Library</a><a href="/vault"{notes_active} data-kind=notes>Notes</a><a href="/vault?vault=html"{html_active} data-kind=html>Artifacts</a></nav>
 {add_panel}
@@ -414,7 +415,7 @@ let reader=$('#reader');
 // `navigate` is how the shell moves the reader; the home page and the empty hint go at the same moment.
 const stillMotion=matchMedia('(prefers-reduced-motion:reduce)');
 function showHome(show){{if(show===!home.hidden)return;if(show)loadHome();home.hidden=!show}}
-function navigate(href){{showHome(false);empty.hidden=true;reader.src=href}}
+function navigate(href){{previewPageLook(href);showHome(false);empty.hidden=true;reader.src=href}}
 function store(k,v){{try{{localStorage.setItem(k,v)}}catch(e){{}}}} function recall(k){{try{{return localStorage.getItem(k)}}catch(e){{return null}}}}
 // Notes remember which folders are OPEN (default shut, the vault is large); Artifacts remembers which are CLOSED (default
 // open, so a project reads at a glance). Library shows those same two trees, and remembers which of its headings is shut.
@@ -802,10 +803,28 @@ for(const [prop,value] of [['--folder-color',f&&f.color],['--guide-color',f&&(f.
 // :root.vault-look, and the glass and the native window in the vault's mode and ground. Kept live with the sidebar's look;
 // `force` is Settings turning it on or off, when the revision last drawn may be the one there is now.
 let LOOK={look_state};
-function syncAppearance(){{const h=native&&window.webkit.messageHandlers.askwAppearance;if(h)Promise.resolve(h.postMessage({{theme:GLASS.vault?GLASS.vault.mode:(document.documentElement.dataset.theme||'system')}})).catch(()=>{{}})}}
-function applyLook(d){{LOOK=d;$('#vault-look').textContent=d.css||'';document.documentElement.classList.toggle('vault-look',!!d.css);setGlassVault(d.css?d:null);syncAppearance();document.dispatchEvent(new Event('onyx:look'))}}
-async function syncSidebarTheme(force){{if(document.hidden&&!force)return;try{{const [d,l]=await Promise.all([api('/api/sidebar-theme'),api('/api/vault-look')]);if(force||l.revision!==LOOK.revision)applyLook(l);if(!force&&d.revision===SIDE_THEME.revision)return;SIDE_THEME=d;$('#sidebar-theme').textContent=d.css||'';document.body.classList.toggle('obsidian-tree',!!d.css);applyTints()}}catch(e){{}}}}
+function syncAppearance(){{const h=native&&window.webkit.messageHandlers.askwAppearance;if(h)Promise.resolve(h.postMessage({{theme:LOOK.css?LOOK.mode:(document.documentElement.dataset.theme||'system')}})).catch(()=>{{}})}}
+function applyLook(d){{const changed=LOOK.revision!==d.revision||LOOK.page_enabled!==d.page_enabled;LOOK=d;if(changed){{PAGE_LOOKS.clear();savePageLooks();PAGE_LOOK=null}}paintLook();syncAppearance();for(const t of TABS.list)try{{if(t.frame&&t.frame.contentWindow.askwRefreshLook)t.frame.contentWindow.askwRefreshLook(d)}}catch(e){{}}try{{window.onyxPageLook(reader.contentWindow,reader.contentWindow.askwPageLook)}}catch(e){{}}}}
+async function syncSidebarTheme(force){{if(document.hidden&&!force)return;try{{const [d,l]=await Promise.all([api('/api/sidebar-theme'),api('/api/vault-look')]);const changed=force||d.revision!==SIDE_THEME.revision;SIDE_THEME=d;$('#sidebar-theme').textContent=d.css||'';if(force||l.revision!==LOOK.revision||l.page_enabled!==LOOK.page_enabled)applyLook(l);else if(changed)paintLook()}}catch(e){{}}}}
 setInterval(syncSidebarTheme,3000); document.addEventListener('visibilitychange',()=>syncSidebarTheme());
+// The visible reader owns the page palette. A background frame may finish loading
+// or change its theme, but cannot recolour the window until its tab is selected.
+// Keep 32 looks for revisits within this window; theme changes use different cache
+// keys. The reader always measures again, so a changed artifact replaces its look.
+let PAGE_LOOK=null;
+const PAGE_LOOKS=new Map();
+try{{for(const [k,v] of JSON.parse(sessionStorage.getItem('askw:page-looks')||'[]').slice(-32))if(typeof k==='string'&&v&&typeof v.css==='string')PAGE_LOOKS.set(k,v)}}catch(e){{}}
+function savePageLooks(){{try{{sessionStorage.setItem('askw:page-looks',JSON.stringify([...PAGE_LOOKS]))}}catch(e){{}}}}
+function pageLookKey(href){{try{{const u=new URL(href,location.origin);return u.origin===location.origin&&u.pathname==='/view'?JSON.stringify([u.searchParams.get('src'),LOOK.revision,document.documentElement.dataset.theme,matchMedia('(prefers-color-scheme:dark)').matches]):null}}catch(e){{return null}}}}
+window.onyxCachedPageLook=href=>LOOK.page_enabled!==false?PAGE_LOOKS.get(pageLookKey(href))||null:null;
+function paintLook(){{const d=PAGE_LOOK||LOOK;$('#vault-look').textContent=(LOOK.css||'')+(PAGE_LOOK?'\\n'+PAGE_LOOK.css:'');document.documentElement.classList.toggle('vault-look',!!d.css);
+document.documentElement.classList.toggle('page-look',!!PAGE_LOOK);document.body.classList.toggle('obsidian-tree',!PAGE_LOOK&&!!SIDE_THEME.css);
+setGlassVault(d.css?d:null);applyTints();document.dispatchEvent(new Event('onyx:look'))}}
+function usePageLook(d){{const next=LOOK.page_enabled!==false&&d&&d.css?d:null;if((PAGE_LOOK&&PAGE_LOOK.revision)===(next&&next.revision))return;PAGE_LOOK=next;paintLook()}}
+window.onyxPageLook=(w,d)=>{{if(w!==reader.contentWindow)return;const key=pageLookKey(w.location.href);if(key){{PAGE_LOOKS.delete(key);if(d&&d.css)PAGE_LOOKS.set(key,d);if(PAGE_LOOKS.size>32)PAGE_LOOKS.delete(PAGE_LOOKS.keys().next().value);savePageLooks()}}usePageLook(d)}};
+function previewPageLook(href){{usePageLook(window.onyxCachedPageLook(href))}}
+onReaderLoad(()=>{{try{{usePageLook(reader.contentWindow.askwPageLook)}}catch(e){{usePageLook(null)}}}});
+document.addEventListener('click',e=>{{if(e.defaultPrevented||e.button||e.metaKey||e.ctrlKey||e.shiftKey||e.altKey)return;const a=e.target.closest&&e.target.closest('a[target]');if(a&&/^reader(-|$)/.test(a.target))previewPageLook(a.href)}});
 // MARK: hover card — a page's whole title, its one line, where it lives, what it is. The first hover waits a beat; after
 // that it follows the pointer row to row at once. A click, scroll, right-click menu, Escape, or leaving puts it away.
 const peek=$('#peek'); let peekRow=null, peekTimer=0, peekWarmUntil=0;
@@ -900,7 +919,7 @@ const RESTORED=restoreTabs();
 // Both trees load up front: Library draws them together, and the first switch is as instant as the rest.
 const FIRST=KIND; if(FIRST==='library'&&!INITIAL_SRC&&!RESTORED)loadHome();
 (FIRST==='library'?loadTree():fetchTree(FIRST).then(()=>{{if(KIND===FIRST)showTree()}})).then(()=>{{for(const k of BOTH)if(!TREES[k])fetchTree(k);{{const s=currentSrc();if(s){{rememberLast(s);highlight(s)}}}}if(KIND!==FIRST||FIRST==='library'||INITIAL_SRC||RESTORED||!rootOf(FIRST))return;const last=recall(KEY+'last');if(last)navigate(viewHref(last,FIRST))}});
-syncAppearance();
+previewPageLook(reader.src);syncAppearance();
 // A fragment names a dialog to open: #settings, #diagnostics, #history — which is where the old launcher's links land.
 {{const h=location.hash.slice(1);if(/^(settings|diagnostics|history)$/.test(h)){{history.replaceState(null,'',location.pathname+location.search);if(h==='history')PANELS.openHistory();else PANELS.openSettings(h==='diagnostics'?'diagnostics':'')}}else PANELS.maybeSetup()}}
 </script></body></html>"""
