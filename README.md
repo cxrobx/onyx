@@ -112,10 +112,15 @@ contracts. Claude Code, Cursor, and Codex all read it automatically.
 
 ## License
 
-MIT — see [`LICENSE`](LICENSE). Copyright © 2026 Christopher Robinson.
+[Business Source License 1.1](LICENSE), © 2026 CX Ventures LLC. The source is
+available and you may use it personally or inside your own organisation.
+Selling it, hosting it for others or bundling it into a commercial product
+needs a commercial licence. Each version becomes Apache-2.0 on 2030-09-30 or
+four years after its release, whichever comes first.
+Versions published before 2026-09-30 were released under the MIT licence.
 
-The project was renamed from **Ask Widget** to **Onyx**; the licence and its
-copyright holder are unchanged by that, and the built wheel carries
-`License-Expression: MIT` with `LICENSE` bundled. No third-party code is
+The project was renamed from **Ask Widget** to **Onyx**; the licence is
+unchanged by that, and the built wheel carries
+`License-Expression: BUSL-1.1` with `LICENSE` bundled. No third-party code is
 vendored here, and every runtime dependency (FastAPI, uvicorn, markdown-it-py,
 pypdf) is MIT- or BSD-licensed.

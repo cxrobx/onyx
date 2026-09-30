@@ -3,7 +3,7 @@ name = "onyx"
 version = "0.6.3"
 description = "Highlight-to-ask reading companion with subscription-backed Claude and Codex CLI providers."
 readme = "README.md"
-license = "MIT"
+license = "BUSL-1.1"
 license-files = ["LICENSE"]
 authors = [{ name = "Christopher Robinson" }]
 requires-python = ">=3.11"

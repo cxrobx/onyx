@@ -2,7 +2,7 @@
   "name": "onyx-obsidian",
   "version": "0.1.0",
   "description": "Obsidian client for the local Onyx service.",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "private": true,
   "type": "module",
   "scripts": {

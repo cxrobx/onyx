@@ -2,7 +2,7 @@
   "name": "onyx-editor",
   "version": "0.1.0",
   "description": "Onyx's Live Preview Markdown editor, built into static/onyx-editor.js.",
-  "license": "MIT",
+  "license": "BUSL-1.1",
   "private": true,
   "type": "module",
   "scripts": {
