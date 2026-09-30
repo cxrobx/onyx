@@ -83,7 +83,7 @@ wrong, as with the rest of `AGENTS.md`.
 |---|---|---|
 | Publisher, crypto, uploader | `src/onyx/mirror/` | Yes (generic, inert by default) |
 | Worker | `integrations/mirror-worker/` (+ `wrangler.example.toml`) | Yes (no config) |
-| iOS app | its own private repo | No |
+| iOS app | its own private repo (decided) | No |
 
 **Publisher.** For each included page:
 - Markdown goes through `viewer.load_local_document(path, display_path=…,
@@ -99,7 +99,7 @@ wrong, as with the rest of `AGENTS.md`.
   search on the phone.
 - It re-publishes a page when its built output's hash changes (so a theme change
   counts), uploads only changed objects, and deletes the objects the new index no
-  longer lists. It runs every few minutes while enabled, plus a *Publish now*.
+  longer lists. It runs every 5 minutes while enabled, plus a *Publish now*.
 - Upload is stdlib `urllib` plus a small SigV4 signer. No `boto3`.
 
 **iOS app (SwiftUI).**
@@ -146,10 +146,10 @@ wrong, as with the rest of `AGENTS.md`.
 
 Once built, these join the Invariants section of `AGENTS.md`.
 
-## Open decisions (the owner's)
+## Decisions
 
-- Which folders go in the include list. Client folders are the ones to decide on
-  deliberately; encryption makes including them safe, but it's still a copy on a
-  phone.
-- Whether the iOS app stays private (the plan's default) or joins this repo.
-- How often to publish (every 5 minutes is the default here).
+- The iOS app stays in its own private repo (decided 2026-09-30).
+- Publish every 5 minutes while enabled, plus *Publish now* (decided 2026-09-30).
+- Still open: which folders go in the include list. Client folders are the ones
+  to decide on deliberately; encryption makes including them safe, but it's
+  still a copy on a phone. This lives only in `mirror.toml`, never in the repo.
