@@ -9,6 +9,10 @@
 #   ONYX_NOTARY_PROFILE="notary-profile" ONYX_SIGN_IDENTITY="…" ./launcher/build-app.sh
 # Otherwise a local build signs with the keychain's Apple Development identity,
 # or ad hoc when there is none (as in CI). ONYX_SIGN_IDENTITY=- forces ad hoc.
+#
+# The app updates itself with Sparkle, which this embeds at Contents/Frameworks. The pinned release is
+# fetched (and its sha256 checked) by launcher/fetch-sparkle.sh. scripts/release.sh wraps this script to
+# make the signed, notarized archive and the appcast that Sparkle reads.
 set -euo pipefail
 
 DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -37,6 +41,9 @@ for arg in "$@"; do
 done
 MIRROR_BUNDLE_ARGS=()
 
+echo "→ Fetching Sparkle…"
+SPARKLE_DIR="$("$DIR/fetch-sparkle.sh")"
+
 if [ ! -x "$BUILDER_VENV/bin/python" ]; then
   echo "→ Creating isolated bundler environment…"
   python3 -m venv "$BUILDER_VENV"
@@ -63,7 +70,7 @@ fi
 
 echo "→ Cleaning…"
 rm -rf "$BUILD"
-mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources"
+mkdir -p "$BUNDLE/Contents/MacOS" "$BUNDLE/Contents/Resources" "$BUNDLE/Contents/Frameworks"
 
 echo "→ Building the Obsidian plugin the app installs…"
 PLUGIN="$ROOT/integrations/obsidian"
@@ -110,8 +117,11 @@ rm -f "$ALFRED_WORKFLOW"
   "$ROOT/integrations/alfred/info.plist" "$ROOT/integrations/alfred/onyx_search.py" "$BUILD/icon.png"
 
 echo "→ Compiling Swift…"
-swiftc -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -O \
+swiftc -F "$SPARKLE_DIR" -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -framework Sparkle \
+  -Xlinker -rpath -Xlinker @executable_path/../Frameworks -O \
   "$DIR/Onyx.swift" -o "$BUNDLE/Contents/MacOS/$BIN_NAME"
+# ditto keeps the framework's Versions/Current symlinks, which a plain file copy flattens and breaks.
+ditto "$SPARKLE_DIR/Sparkle.framework" "$BUNDLE/Contents/Frameworks/Sparkle.framework"
 
 echo "→ Assembling bundle…"
 cp "$DIR/Info.plist" "$BUNDLE/Contents/Info.plist"
@@ -122,6 +132,16 @@ cp "$DIR/icon/Assets.car" "$BUNDLE/Contents/Resources/Assets.car"
 
 echo "→ Signing…"
 if [ -n "$SIGN_IDENTITY" ] && [ "$SIGN_IDENTITY" != "-" ]; then
+  # Sparkle's helpers, innermost first, as its documentation gives them for Developer ID (no --deep): the
+  # two XPC services, the Autoupdate tool, the Updater app, then the framework around them. Each needs the
+  # hardened runtime and a timestamp to notarize. The downloader keeps the entitlements it was built with.
+  SPARKLE_FW="$BUNDLE/Contents/Frameworks/Sparkle.framework/Versions/B"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$SPARKLE_FW/XPCServices/Installer.xpc"
+  codesign --force --options runtime --timestamp --preserve-metadata=entitlements \
+    --sign "$SIGN_IDENTITY" "$SPARKLE_FW/XPCServices/Downloader.xpc"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$SPARKLE_FW/Autoupdate"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$SPARKLE_FW/Updater.app"
+  codesign --force --options runtime --timestamp --sign "$SIGN_IDENTITY" "$BUNDLE/Contents/Frameworks/Sparkle.framework"
   # --deep never reaches Mach-O files under Contents/Resources, so the frozen service
   # went to the notary unsigned and was rejected. Sign each of its binaries first,
   # innermost first, the executable last, then seal the bundle around them.

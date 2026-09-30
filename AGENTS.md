@@ -20,8 +20,8 @@ That is what CI runs, and it is the only command guaranteed to work — there is
 `fastapi`. The rest of CI, worth running when you touch those surfaces:
 
 ```bash
-swiftc -typecheck -framework Cocoa -framework WebKit \
-  -framework UniformTypeIdentifiers launcher/Onyx.swift
+swiftc -typecheck -F "$(./launcher/fetch-sparkle.sh)" -framework Cocoa -framework WebKit \
+  -framework UniformTypeIdentifiers -framework Sparkle launcher/Onyx.swift
 plutil -lint launcher/Info.plist
 cd integrations/obsidian && npm ci && npm run check && npm run build && npm test
 cd editor && npm ci && npm run check && npm run build && git diff --exit-code ../static/onyx-editor.js
@@ -136,6 +136,17 @@ everything else.
 session and Codex through ChatGPT. API-key environment variables are stripped and
 non-subscription sessions are rejected, deliberately, so the app can never bill
 the user per token. Do not add an API-key path.
+
+**Updates are signed, https, and asked for.** The app updates with Sparkle (`launcher/fetch-sparkle.sh`
+pins its version and sha256; the framework is never committed). `launcher/Info.plist` carries an https
+GitHub `SUFeedURL`, the `SUPublicEDKey` every installed copy trusts, and keeps `SUAutomaticallyUpdate` off
+(the user is asked) and `SUVerifyUpdateBeforeExtraction` on. The private key is the identity of the update
+channel: it lives in the login Keychain (Sparkle account `onyx`) and the secrets store, never in the repo,
+and a new key strands every installed copy. A test build may point `SUFeedURL` at localhost, a release build
+may not. `scripts/release.sh` never publishes without `--publish`, and `scripts/verify-update-feed.sh` is how
+a feed is checked before and after. An installed Onyx fails `codesign --verify` on purpose (see
+`adoptCustomIcon`); Sparkle still installs over it.
+→ `tests/test_updater.py`
 
 **Version metadata moves together.** `src/onyx/__init__.py`, the Obsidian
 `manifest.json` and `versions.json`, and the release metadata must agree.

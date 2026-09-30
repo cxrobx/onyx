@@ -11,9 +11,9 @@
     <key>CFBundleIdentifier</key>
     <string>com.cx.onyx</string>
     <key>CFBundleVersion</key>
-    <string>0.6.3</string>
+    <string>0.6.4</string>
     <key>CFBundleShortVersionString</key>
-    <string>0.6.3</string>
+    <string>0.6.4</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>LSApplicationCategoryType</key>
@@ -27,6 +27,18 @@
     <key>LSMinimumSystemVersion</key>
     <string>13.0</string>
     <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>SUFeedURL</key>
+    <string>https://github.com/cxrobx/onyx/releases/latest/download/appcast.xml</string>
+    <key>SUPublicEDKey</key>
+    <string>OjYFMjZP/BvrIBSuYQmFIsKOU5GSq6e3g9cS9GJaAXc=</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>86400</integer>
+    <key>SUAutomaticallyUpdate</key>
+    <false/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
     <key>CFBundleDocumentTypes</key>
     <array>

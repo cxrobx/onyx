@@ -13,3 +13,4 @@ editor/node_modules/
 integrations/mirror-worker/wrangler.toml
 integrations/mirror-worker/node_modules/
 integrations/mirror-worker/.wrangler/
+/dist/

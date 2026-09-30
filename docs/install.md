@@ -19,10 +19,10 @@ The build installs `/Applications/Onyx.app`, refreshes macOS Services, and
 also produces:
 
 ```text
-launcher/build/Onyx-0.6.3-macOS-arm64.zip
-launcher/build/Onyx-0.6.3-macOS-arm64.zip.sha256
-launcher/build/Onyx-0.6.3-macOS-arm64.dmg
-launcher/build/Onyx-0.6.3-macOS-arm64.dmg.sha256
+launcher/build/Onyx-0.6.4-macOS-arm64.zip
+launcher/build/Onyx-0.6.4-macOS-arm64.zip.sha256
+launcher/build/Onyx-0.6.4-macOS-arm64.dmg
+launcher/build/Onyx-0.6.4-macOS-arm64.dmg.sha256
 launcher/build/Open-in-Onyx.alfredworkflow
 launcher/build/Open-in-Onyx.alfredworkflow.sha256
 ```
@@ -44,7 +44,10 @@ The launcher:
   `~/Library/Logs/Onyx/onyx.log` and rotates it at 2 MB;
 - discovers Claude and Codex through the login shell and common GUI-safe paths,
   including NVM-installed Codex binaries;
-- provides **Onyx ▸ Check for Updates…** using published GitHub releases.
+- updates itself with [Sparkle](https://sparkle-project.org): it checks the release feed daily and on
+  **Onyx ▸ Check for Updates…**, asks before installing, and refuses a download whose EdDSA signature
+  is not ours (see [Updates](development.md#updates));
+- restarts the background service (`scripts/install-daemon.sh`) when its version is not the app's.
 
 ## Run from a checkout
 

@@ -4,6 +4,7 @@
 // checkout-local runtime remains as a development fallback, but the installed
 // app never depends on ~/Projects/ask-widget or its .venv.
 import Cocoa
+import Sparkle
 @preconcurrency import WebKit
 import UniformTypeIdentifiers
 
@@ -11,11 +12,13 @@ private let port = 8899
 private let baseURL = "http://127.0.0.1:\(port)"
 private let expectedService = "onyx"
 private let expectedProtocol = 3
-private let releasesURL = URL(string: "https://github.com/cxrobx/onyx/releases/latest")!
-private let releasesAPIURL = URL(string: "https://api.github.com/repos/cxrobx/onyx/releases/latest")!
+/// The LaunchAgent scripts/install-daemon.sh installs, and the one app `scripts/onyx-daemon.sh` runs the service from.
+/// An update replaces the app but not a service already running: see `staleBackgroundServiceVersion`.
+private let daemonLabel = "com.cx.onyx.server"
+private let daemonAppPath = "/Applications/Onyx.app"
 
 private enum HealthResult {
-    case healthy(providerAvailable: Bool)
+    case healthy(providerAvailable: Bool, version: String?)
     case unavailable(String)
     case incompatible(String)
 }
@@ -57,7 +60,8 @@ private let customIconDefaultsKey = "customIcon"
 /// Finder-info attribute into the bundle, which `codesign --verify` then reports, as it does for any
 /// custom app icon. When the bundle isn't writable (a shared /Applications, App Translocation), the
 /// call fails and the dark square stays: that is the fallback. An update replaces the bundle and
-/// its first launch sets the icon again.
+/// its first launch sets the icon again. Sparkle installs over a bundle that carries the icon without
+/// complaint: tested 2026-09-30 with a signed copy that had set it.
 private func adoptCustomIcon() -> String {
     let bundle = Bundle.main.bundleURL
     guard bundle.pathExtension == "app" else { return "not an app bundle" }
@@ -315,6 +319,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     private var dockNotes: [DockRecentItem] = []
     private var dockRefreshTimer: Timer?
     private var dockRefreshInFlight = false
+    /// Sparkle: checks the appcast named by SUFeedURL in Info.plist each day and on the menu item, verifies the
+    /// download's EdDSA signature (SUPublicEDKey) before extracting it, and asks before installing anything. The
+    /// controller starts its updater when it is created, so it is made once the app has finished launching.
+    private var updaterController: SPUStandardUpdaterController!
     private let zoomLevels: [CGFloat] = [
         0.50, 0.67, 0.80, 0.90, 1.00, 1.10, 1.25, 1.50, 1.75, 2.00, 2.50, 3.00,
     ]
@@ -330,6 +338,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.servicesProvider = self
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil
+        )
         // The last theme a page chose, so the launch window and its title bar
         // come up in it rather than flashing the system appearance first.
         NSApp.appearance = appearance(
@@ -518,8 +529,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             DispatchQueue.main.async {
                 guard let self, self.startupID == id else { return }
                 switch result {
-                case .healthy(let providerAvailable):
-                    self.openApp(providerAvailable: providerAvailable)
+                case .healthy(let providerAvailable, let version):
+                    if let stale = self.staleBackgroundServiceVersion(reported: version) {
+                        self.restartBackgroundService(
+                            from: stale, providerAvailable: providerAvailable, id: id
+                        )
+                    } else {
+                        self.openApp(providerAvailable: providerAvailable)
+                    }
                 case .incompatible(let detail):
                     self.failStartup(
                         "Port \(port) is already in use by another service.",
@@ -619,19 +636,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             let providerAvailable =
                 (json["claude_available"] as? Bool ?? false) ||
                 (json["codex_available"] as? Bool ?? false)
-            completion(.healthy(providerAvailable: providerAvailable))
+            completion(.healthy(providerAvailable: providerAvailable, version: json["version"] as? String))
         }.resume()
     }
 
-    private func waitForServer(id: UUID, deadline: Date) {
+    /// Polls until a service answers. With `expecting`, an answer from any other version is the old service still
+    /// going down, so it keeps waiting; at the deadline it takes what answers, or starts a service of its own.
+    private func waitForServer(id: UUID, deadline: Date, expecting: String? = nil) {
         guard startupID == id else { return }
         checkHealth { [weak self] result in
             guard let self else { return }
             DispatchQueue.main.async {
                 guard self.startupID == id, !self.showingFailure else { return }
+                let again = {
+                    self.updateStatus("Waiting for the local service…")
+                    DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) {
+                        self.waitForServer(id: id, deadline: deadline, expecting: expecting)
+                    }
+                }
                 switch result {
-                case .healthy(let providerAvailable):
-                    self.openApp(providerAvailable: providerAvailable)
+                case .healthy(let providerAvailable, let version):
+                    if let expecting, version != expecting, Date() < deadline {
+                        again()
+                    } else {
+                        if let expecting, version != expecting {
+                            NSLog("Onyx: the service still reports %@, not %@; opening anyway", version ?? "no version", expecting)
+                        }
+                        self.openApp(providerAvailable: providerAvailable)
+                    }
                 case .incompatible(let detail):
                     self.failStartup(
                         "The local service returned an incompatible response.",
@@ -639,18 +671,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
                         id: id
                     )
                 case .unavailable:
-                    if Date() >= deadline {
+                    if Date() < deadline {
+                        again()
+                    } else if expecting != nil {
+                        // The restart never brought a service back: start one, as if none had been running.
+                        self.startServer(id: id)
+                    } else {
                         self.failStartup(
                             "The Onyx service did not become ready.",
                             detail: "Startup exceeded 20 seconds.",
                             id: id
                         )
-                    } else {
-                        self.updateStatus("Waiting for the local service…")
-                        DispatchQueue.global().asyncAfter(deadline: .now() + 0.25) {
-                            self.waitForServer(id: id, deadline: deadline)
-                        }
                     }
+                }
+            }
+        }
+    }
+
+    /// The version a background service is running when it is not this app's, and this app is the one it is run from.
+    ///
+    /// `scripts/onyx-daemon.sh` runs the service from /Applications/Onyx.app and keeps it across the app quitting. An
+    /// update replaces the app's files, not that process: it carries on running the old code and this app, which
+    /// adopts any healthy service on the port, would show its pages. So a service reporting another version than the
+    /// app's is restarted, once per launch. A copy of the app run from anywhere else (a build in launcher/build, a
+    /// disk image) never touches it: that service was started from a different app.
+    private func staleBackgroundServiceVersion(reported: String?) -> String? {
+        // Both sides resolved the same way: resolvingSymlinksInPath rewrites /private/tmp to /tmp, so one side alone
+        // would miss a bundle that sits under a symlinked folder.
+        guard let reported, reported != currentVersion(),
+              Bundle.main.bundleURL.resolvingSymlinksInPath().path
+                == URL(fileURLWithPath: daemonAppPath).resolvingSymlinksInPath().path else { return nil }
+        return reported
+    }
+
+    private func restartBackgroundService(from stale: String, providerAvailable: Bool, id: UUID) {
+        let current = currentVersion()
+        NSLog("Onyx: the background service runs %@ but this app is %@; restarting %@", stale, current, daemonLabel)
+        updateStatus("Restarting the background service on \(current)…")
+        DispatchQueue.global().async { [weak self] in
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/bin/launchctl")
+            process.arguments = ["kickstart", "-k", "gui/\(getuid())/\(daemonLabel)"]
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            var restarted = false
+            do {
+                try process.run()
+                process.waitUntilExit()
+                restarted = process.terminationStatus == 0
+            } catch {}
+            DispatchQueue.main.async {
+                guard let self, self.startupID == id else { return }
+                if restarted {
+                    self.waitForServer(id: id, deadline: Date().addingTimeInterval(20), expecting: current)
+                } else {
+                    // No such LaunchAgent: the service belongs to something else, so it stays as it was.
+                    NSLog("Onyx: %@ is not loaded; keeping the service that answers", daemonLabel)
+                    self.openApp(providerAvailable: providerAvailable)
                 }
             }
         }
@@ -1424,54 +1501,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         ensureLogExists()
         NSWorkspace.shared.open(logURL)
     }
-    @objc private func checkForUpdates() {
-        var request = URLRequest(url: releasesAPIURL)
-        request.timeoutInterval = 10
-        request.setValue("Onyx/\(currentVersion())", forHTTPHeaderField: "User-Agent")
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        URLSession.shared.dataTask(with: request) { [weak self] data, response, error in
-            let status = (response as? HTTPURLResponse)?.statusCode
-            guard error == nil, status == 200, let data,
-                  let payload = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let rawTag = payload["tag_name"] as? String else {
-                DispatchQueue.main.async {
-                    self?.showUpdateResult(
-                        title: "Couldn’t Check for Updates",
-                        message: error?.localizedDescription ?? "GitHub returned HTTP \(status ?? 0).",
-                        offerReleases: true
-                    )
-                }
-                return
-            }
-            let latest = rawTag.trimmingCharacters(in: CharacterSet(charactersIn: "vV"))
-            let current = self?.currentVersion() ?? "0"
-            let isNewer = latest.compare(current, options: .numeric) == .orderedDescending
-            DispatchQueue.main.async {
-                self?.showUpdateResult(
-                    title: isNewer ? "Onyx \(latest) Is Available" : "Onyx Is Up to Date",
-                    message: isNewer
-                        ? "You’re running \(current). Open the release page to download the update."
-                        : "You’re running the latest release (\(current)).",
-                    offerReleases: isNewer
-                )
-            }
-        }.resume()
-    }
-
     private func currentVersion() -> String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "0"
     }
 
-    private func showUpdateResult(title: String, message: String, offerReleases: Bool) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        if offerReleases { alert.addButton(withTitle: "Open Releases") }
-        alert.addButton(withTitle: offerReleases ? "Later" : "OK")
-        if alert.runModal() == .alertFirstButtonReturn, offerReleases {
-            NSWorkspace.shared.open(releasesURL)
-        }
-    }
     @objc private func openDocument() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = supportedDocumentTypes()
@@ -1543,7 +1576,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             action: #selector(NSApplication.orderFrontStandardAboutPanel(_:)),
             keyEquivalent: ""
         ))
-        appMenu.addItem(menuItem("Check for Updates…", #selector(checkForUpdates), ""))
+        // Sparkle's own item: it is the controller's target, so the controller also greys it out mid-check.
+        let updatesItem = NSMenuItem(
+            title: "Check for Updates…",
+            action: #selector(SPUStandardUpdaterController.checkForUpdates(_:)),
+            keyEquivalent: ""
+        )
+        updatesItem.target = updaterController
+        appMenu.addItem(updatesItem)
         appMenu.addItem(.separator())
         appMenu.addItem(menuItem("Settings…", #selector(openSettings), ","))
         appMenu.addItem(.separator())
