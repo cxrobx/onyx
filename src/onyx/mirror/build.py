@@ -63,6 +63,8 @@ class MirrorBuild(list[BuiltObject]):
         super().__init__()
         self.skipped: list[str] = []  # mirror paths of pages left out because reading or rendering them failed
         self.truncated = False  # a vault index hit its entry cap, so pages past it were never seen
+        # realpath → page id for every page published, so the library can name the pages Onyx's history keys by realpath
+        self.pages_by_real: dict[str, str] = {}
 
 
 # MARK: - Membership
@@ -432,6 +434,8 @@ def build_mirror(
         built.append(obj)
         used.update(referenced)
     built.extend(sorted(used.values(), key=lambda asset: asset.name))
+    published = {obj.id for obj in built if obj.page is not None}
+    built.pages_by_real = {real: id_ for real, id_ in where.real.items() if id_ in published}
     return built
 
 

@@ -53,6 +53,16 @@ def markdown_css_for(storage, roots: dict[str, Path]) -> str | None:
     return markdown_theme_css(storage, roots.get("Notes"))
 
 
+def library_for(storage, config, markdown_css: str | None) -> Callable:
+    """The publisher's hook for the Library object: recent pages always, recent asks when `chats = true`."""
+    from .library import build_library
+
+    def build(built, ids):
+        return build_library(storage, built=built, ids=ids, markdown_css=markdown_css, chats=config.chats)
+
+    return build
+
+
 def look_for(storage, roots: dict[str, Path]) -> dict:
     """What the Mac app wears, for the phone's chrome: the index's ``look`` (wire format, "Look").
 
@@ -114,6 +124,7 @@ class Publisher:
                 config=config, secrets=self._secrets, store=R2Store.from_secrets(self._secrets),
                 roots=roots, markdown_css=markdown_css_for(self._storage, roots), data_dir=self._storage.data_dir,
                 look=look_for(self._storage, roots),
+                library=library_for(self._storage, config, markdown_css_for(self._storage, roots)),
             )
         except Exception as exc:  # the thread must outlive one bad cycle
             message = describe_error(exc)

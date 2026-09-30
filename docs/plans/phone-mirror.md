@@ -157,6 +157,41 @@ v1:
 - `appearance` is the Mac's app theme (`system`, `light` or `dark`), used when
   `vault` is `null`.
 
+**Library (optional, added 2026-09-30).** A second small object, named `library`
+(`id("library")`, sealed and raw-DEFLATEd like the index), carries what the Mac's
+Library home shows. It is its own object because it changes whenever a page is
+opened, and re-sending the 1.7 MB index for that would be waste:
+
+```json
+{
+  "v": 1,
+  "recent": [{"id": "<page id>", "opened_at": 1790000000.0}],
+  "chats": [{"id": "<chat page id>", "doc": "<page id>", "title": "…",
+             "action": "ask", "turns": 3, "started_at": 1790000000.0,
+             "updated_at": 1790000500.0}]
+}
+```
+
+- `recent`: the Mac's recently opened documents (newest first, at most 30), only
+  those that are published pages; a document outside the mirror is never listed.
+- `chats`: conversation threads (a question and its follow-ups), newest first by
+  `updated_at`, at most 100, only completed asks, and only when `mirror.toml` says
+  `chats = true` (off by default) and only for a thread whose document is a
+  published page. `action` is `ask`, `eli5` or `prove` (the thread's first
+  turn); `turns` counts completed answers in it.
+- Each thread is also a page in the index: `kind` `"chat"`, path
+  `Chats/<first request id>`, name `page:Chats/<first request id>`. Its HTML is
+  built on the Mac: a link back to its document (`href="<page id>"`), then each
+  turn's label, the highlighted passage (first turn), the question, and the answer
+  rendered from Markdown with raw HTML off, in the vault's reading theme. Links in
+  an answer are kept only for `http(s)`; anything else becomes
+  `#onyx-unpublished`. Chat pages are searchable on the phone but are not part of
+  the folder tree.
+- The phone may merge `recent` with its own record of pages it opened (it never
+  writes back), newest first.
+- The library is uploaded after the index, so everything it names is already
+  there; the phone ignores any id the index doesn't list.
+
 **Pages.** UTF-8 HTML, complete documents. A link to another published page is
 the relative `href="<id>"` (plus `#fragment`); an image or other asset is
 `src="<id>"`; a link to a page that isn't published is

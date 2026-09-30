@@ -1093,7 +1093,7 @@ class CliTests(MirrorTestCase):
         self.assertEqual((code, err), (0, ""))
         self.assertIn("Published 1 pages and 0 assets: 1 uploaded", out)
         self.assertIn("dry run", out)
-        self.assertEqual(len(list((self.base / "dry" / "o").iterdir())), 2)
+        self.assertEqual(len(list((self.base / "dry" / "o").iterdir())), 3)  # the page, the index, the library
 
     def test_the_cli_opens_the_app_storage_as_the_app_does(self) -> None:
         # Storage(None) adopts a pre-rename database; Storage(<default dir>) would create an empty one first.

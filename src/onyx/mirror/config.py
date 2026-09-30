@@ -28,6 +28,9 @@ class MirrorConfig:
     interval_minutes: int
     include: tuple[str, ...]
     exclude: tuple[str, ...]
+    # Recent asks go to the phone only when mirror.toml says `chats = true`: an answer can quote whatever its context
+    # folder held, which reaches wider than the page it was asked on.
+    chats: bool = False
 
 
 def path_for(data_dir: Path | None = None) -> Path:
@@ -81,6 +84,7 @@ def load(data_dir: Path | None = None) -> MirrorConfig | None:
         interval_minutes=_interval(raw.get("interval_minutes", DEFAULT_INTERVAL_MINUTES)),
         include=include,
         exclude=exclude,
+        chats=raw.get("chats") is True,
     )
 
 
@@ -90,7 +94,7 @@ def _quote(value: str) -> str:
 
 
 def render(*, enabled: bool, interval_minutes: int, include: tuple[str, ...] | list[str],
-           exclude: tuple[str, ...] | list[str]) -> str:
+           exclude: tuple[str, ...] | list[str], chats: bool = False) -> str:
     """The file's text. Used for the setup template and to rebuild a file ``disable`` cannot edit in place."""
     return (
         "# The Onyx phone mirror (docs/plans/phone-mirror.md). Nothing is published unless enabled = true.\n"
@@ -102,6 +106,8 @@ def render(*, enabled: bool, interval_minutes: int, include: tuple[str, ...] | l
         f"include = [{', '.join(_quote(p) for p in include)}]\n"
         "# Paths under these are never published, even when an include covers them.\n"
         f"exclude = [{', '.join(_quote(p) for p in exclude)}]\n"
+        "# Recent asks (and their answers) go to the phone only when this is true; only asks on published pages.\n"
+        f"chats = {'true' if chats else 'false'}\n"
     )
 
 
@@ -142,5 +148,6 @@ def disable(data_dir: Path | None = None) -> bool:
     raw = _read(path) or {}
     if raw.get("enabled") is not False:
         _write(path, render(enabled=False, interval_minutes=_interval(raw.get("interval_minutes")),
-                            include=_paths(raw.get("include")) or (), exclude=_paths(raw.get("exclude", [])) or ()))
+                            include=_paths(raw.get("include")) or (), exclude=_paths(raw.get("exclude", [])) or (),
+                            chats=raw.get("chats") is True))
     return True

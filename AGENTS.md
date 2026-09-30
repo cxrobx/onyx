@@ -112,7 +112,7 @@ iOS app all implement). This repo is public, so it does nothing unless the real
 entry point runs (`AppConfig.mirror`) *and* `mirror.toml` in the data dir says
 `enabled = true` with a non-empty `include`. A page is published only if the vault
 index lists it under an included path; an asset only if a published page references
-it and it lives under the home folder. Every byte and every object name leaving the
+it and it lives under the home folder. The Library's recent pages and recent asks name only published pages, and asks go at all only with `chats = true`. Every byte and every object name leaving the
 Mac is encrypted or HMAC'd. Credentials live only in the Keychain (service
 `onyx-mirror`, written through `security -i` on stdin, never argv) and never reach
 settings, diagnostics, logs or reports. No endpoint, bucket or token is ever
@@ -126,7 +126,10 @@ everything else.
 `test_mirror_credentials_never_reach_settings_or_logs`,
 `test_keychain_writes_keep_values_off_argv`,
 `test_repo_tracks_no_private_endpoint`,
-`test_mirror_crypto_matches_the_shared_vectors`, and the Worker's
+`test_mirror_crypto_matches_the_shared_vectors`,
+`test_mirror_chats_stay_home_without_the_switch`,
+`test_mirror_publishes_only_completed_asks_on_published_pages`,
+`test_mirror_answers_cannot_run_script`, and the Worker's
 `node --test` in `integrations/mirror-worker`
 
 **Subscription-only execution.** Claude runs through a signed-in claude.ai

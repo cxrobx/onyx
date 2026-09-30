@@ -36,7 +36,7 @@ from .store import Store
 STATE_VERSION = 1
 INDEX_VERSION = 1
 MAX_TEXT = 20_000
-KINDS = ("markdown", "html", "text")
+KINDS = ("markdown", "html", "text", "chat")  # "chat": a thread of asks (library.py)
 
 
 @dataclass(frozen=True)
@@ -174,7 +174,8 @@ def _index_entries(current: dict, known: dict) -> tuple[list[dict], list[dict]]:
 
 def publish(*, config: MirrorConfig, secrets: keychain.Secrets, store: Store, roots: dict[str, Path],
             markdown_css: str | None, data_dir: Path, build: Callable | None = None,
-            now: datetime | None = None, look: dict | None = None) -> PublishReport:
+            now: datetime | None = None, look: dict | None = None,
+            library: Callable | None = None) -> PublishReport:
     master = secrets.get(keychain.MASTER_KEY)
     if not master:
         raise MirrorNotConfigured("master_key is missing from the Keychain (run `onyx mirror setup --generate`)")
@@ -188,6 +189,11 @@ def publish(*, config: MirrorConfig, secrets: keychain.Secrets, store: Store, ro
                       ids=keys.ident, markdown_css=markdown_css)
         current = {}
         for obj in built:
+            current.setdefault(obj.id, obj)
+        # The Library's thread pages publish like any other page; its lists go up after the index (below).
+        # A failure here fails the whole publish rather than dropping the thread pages and deleting them.
+        shelf = library(built, keys.ident) if library is not None else None
+        for obj in (shelf.pages if shelf else ()):
             current.setdefault(obj.id, obj)
 
         path = state_path(data_dir, store.destination)
@@ -238,6 +244,19 @@ def publish(*, config: MirrorConfig, secrets: keychain.Secrets, store: Store, ro
                 index_uploaded = True
                 sent += len(blob)
                 dirty = True
+
+            if shelf is not None:
+                # Its own object, so opening a page (which reorders `recent`) re-sends a few KB, not the index.
+                # Kept out of `known`, as the index is, so the stale sweep never takes it.
+                library_id = keys.ident("library")
+                raw = json.dumps(shelf.library, sort_keys=True, ensure_ascii=False).encode("utf-8")
+                shelf_key = _sha(library_id.encode() + b"\0" + raw)
+                if (state.get("library") or {}).get("key") != shelf_key:
+                    blob = keys.seal(library_id, deflate_raw(raw))
+                    store.put(library_id, blob)
+                    state["library"] = {"key": shelf_key, "at": published_at}
+                    sent += len(blob)
+                    dirty = True
 
             deleted = 0
             # After a cut-short walk whatever is missing was never looked at, so nothing is deleted, whether or not
