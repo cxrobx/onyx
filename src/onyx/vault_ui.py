@@ -224,8 +224,10 @@ main,body.native main{{position:relative;display:grid;padding:0;overflow:hidden}
    note's backdrop-filter) stayed drawn over the tab brought forward, and the trackpad kept scrolling the tab that had
    been showing (both seen 2026-09-21 in a real window; both Playwright engines and a software snapshot got it right).
    Opacity is what hid the layers; moving the frames is what gave the scrolling back. Down, not sideways, where no
-   sidebar or panel lies to be scrolled in their place. */
-#stage{{position:relative;display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);min-width:0;min-height:0;overflow:hidden}}
+   sidebar or panel lies to be scrolled in their place. Clipped, not hidden: frames below give an overflow:hidden box room
+   to scroll, and the app's WebKit scrolled it to reveal whatever took focus in the page (the Ask menu), lifting the page
+   with nothing to scroll it back (2026-09-30). A clip is never a scroller. */
+#stage{{position:relative;display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);min-width:0;min-height:0;overflow:clip}}
 #stage>iframe{{grid-area:1/1;display:block;width:100%;height:100%;border:0;background:transparent}} #stage>iframe:not(#reader){{visibility:hidden;opacity:0;transform:translateY(calc(100% + 40px))}}
 #reader-empty{{position:absolute;inset:0;display:grid;place-items:center;padding:24px;color:rgb(var(--muted));font-size:14px;text-align:center;pointer-events:none}} #reader-empty[hidden]{{display:none}} #reader-empty a{{pointer-events:auto;color:rgb(var(--accent))}}
 /* Library's home, in the reader's place while no page is open: open something, what you had open, what you asked. */

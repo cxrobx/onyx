@@ -4070,6 +4070,60 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_asking_with_a_tab_behind_leaves_the_page_where_it_was(self) -> None:
+        # "The entire bottom half of the page shifted, the only way to fix it is to refresh" (2026-09-30, the app's
+        # WebKit 17.5 at 125%): the tabs behind wait below the window, so #stage had room to scroll, and the menu
+        # taking focus scrolled it to reveal the item. Nothing scrolls it back, so the page stayed lifted with the
+        # window showing through beneath. Only with a second tab open; the fix is #stage's overflow:clip.
+        artifacts = self.root / "Artifacts"
+        artifacts.mkdir()
+        rows = "".join(
+            f"<tr><td>Study {n}</td><td>Finding {n}, long enough to fill the cell with a line of words.</td>"
+            f"<td>Rule {n}</td></tr>" for n in range(40)
+        )
+        (artifacts / "table.html").write_text(
+            f'<title>Table</title><body style="margin:40px;font:16px/1.6 sans-serif"><table>{rows}</table></body>',
+            encoding="utf-8",
+        )
+        (artifacts / "second.html").write_text("<title>Second</title><h1>Second</h1><p>Another page.</p>", encoding="utf-8")
+        self.app.state.storage.update_settings({"html_vault_root": str(artifacts)}, model_default="sonnet")
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    src = urllib.parse.quote(str(artifacts / "table.html"))
+                    page.goto(f"{self.base_url}/vault?vault=html&src={src}", wait_until="networkidle")
+                    frame = page.frame_locator("#reader")
+                    frame.locator(".askw-pill").wait_for()
+                    page.evaluate("h => openTab(h, {kind: 'html', background: true})", f"/view?src={urllib.parse.quote(str(artifacts / 'second.html'))}")
+                    page.locator("#stage > iframe:not(#reader)").wait_for(state="attached")
+                    reader_before = page.locator("#reader").bounding_box()
+                    # Both Playwright engines leave #stage alone on focus, so hold the cause itself: however it is
+                    # asked to, the reader's place does not scroll.
+                    self.assertEqual(page.evaluate("() => { const s = document.getElementById('stage'); s.scrollTop = 500; return s.scrollTop }"), 0)
+
+                    def still() -> None:
+                        self.assertEqual(page.evaluate("() => [...document.querySelectorAll('*')].filter(e => e.scrollTop || e.scrollLeft).map(e => e.id || e.tagName)"), [])
+                        self.assertEqual(page.locator("#reader").bounding_box(), reader_before)
+
+                    # A selection across the cells of a row near the bottom of the window, asked about by right-click.
+                    frame.locator("html").evaluate("""h => { const row = h.querySelectorAll('tr')[12], g = document.createRange();
+                        g.setStart(row.cells[0].firstChild, 1); g.setEnd(row.cells[2].firstChild, 4);
+                        getSelection().removeAllRanges(); getSelection().addRange(g); }""")
+                    cell = frame.locator("tr").nth(12).locator("td").nth(1).bounding_box()
+                    page.mouse.click(cell["x"] + 20, cell["y"] + cell["height"] / 2, button="right")
+                    expect(frame.locator(".askw-menu")).to_be_visible()
+                    still()
+                    frame.locator(".askw-item[data-act=ask]").click()
+                    expect(frame.locator(".askw-ask-input")).to_be_focused()
+                    still()
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_command_b_leaves_the_page_alone_in_the_window(self) -> None:
         # "In some artifacts the buttons of the app clash with the buttons of the HTML": a nav bar across the top of the
         # page sits in the tab bar's zone, so resting on one of its links brought the bar's card out over it. ⌘B is Page
