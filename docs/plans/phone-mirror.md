@@ -1,6 +1,6 @@
 # Plan: a read-only phone mirror
 
-Status: proposed, 2026-09-30. Nothing here is built yet.
+Status: built 2026-09-30 (Mac publisher, Worker, iOS app in its own private repo). Phases 1–4 done; the QR scan and the phone against the live Worker are verified on the device by the owner.
 
 Read your notes and Artifacts on an iPhone without Obsidian Sync. The Mac publishes
 an encrypted copy to free object storage, and a small iOS app keeps a copy of its
