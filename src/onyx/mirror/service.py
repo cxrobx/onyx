@@ -53,12 +53,17 @@ def markdown_css_for(storage, roots: dict[str, Path]) -> str | None:
     return markdown_theme_css(storage, roots.get("Notes"))
 
 
-def library_for(storage, config, markdown_css: str | None) -> Callable:
-    """The publisher's hook for the Library object: recent pages always, recent asks when `chats = true`."""
+def library_for(storage, config, look: dict | None) -> Callable:
+    """The publisher's hook for the Library object: recent pages always, recent asks when `chats = true`.
+
+    ``look`` is the index's look; its vault palette dresses the thread pages as the Mac's own chrome is dressed.
+    """
     from .library import build_library
 
+    vault = (look or {}).get("vault")
+
     def build(built, ids):
-        return build_library(storage, built=built, ids=ids, markdown_css=markdown_css, chats=config.chats)
+        return build_library(storage, built=built, ids=ids, look=vault, chats=config.chats)
 
     return build
 
@@ -120,11 +125,12 @@ class Publisher:
             return mirror_config.DEFAULT_INTERVAL_MINUTES
         try:
             roots = self._roots()
+            look = look_for(self._storage, roots)
             report = publish(
                 config=config, secrets=self._secrets, store=R2Store.from_secrets(self._secrets),
                 roots=roots, markdown_css=markdown_css_for(self._storage, roots), data_dir=self._storage.data_dir,
-                look=look_for(self._storage, roots),
-                library=library_for(self._storage, config, markdown_css_for(self._storage, roots)),
+                look=look,
+                library=library_for(self._storage, config, look),
             )
         except Exception as exc:  # the thread must outlive one bad cycle
             message = describe_error(exc)

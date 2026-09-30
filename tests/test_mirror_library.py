@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import shutil
+import subprocess
 import tempfile
 import unittest
 from datetime import datetime, timezone
@@ -78,7 +80,7 @@ class LibraryTests(unittest.TestCase):
         self.built.pages_by_real = {str(self.shown): self.shown_id, str(self.target): self.guide_id}
 
     def library(self, history: FakeHistory, *, chats: bool = True):
-        return build_library(history, built=self.built, ids=ids, markdown_css=None, chats=chats)
+        return build_library(history, built=self.built, ids=ids, look=None, chats=chats)
 
     def test_mirror_recent_lists_only_published_pages(self) -> None:
         history = FakeHistory([
@@ -129,17 +131,47 @@ class LibraryTests(unittest.TestCase):
 
     def test_mirror_answers_cannot_run_script(self) -> None:
         answer = ("<script>alert(1)</script> <img src=x onerror=alert(2)> [bad](javascript:alert(3)) "
-                  "[local](/Users/someone/file.md) [web](https://example.com/a) ![pic](/Users/someone/p.png)")
+                  "[web](https://example.com/a) **bold**")
         history = FakeHistory([], [conversation("r1", str(self.shown), started=1.0, answer=answer)])
         html = self.library(history).pages[0].data.decode()
-        body = html[html.index("<main>"):]
-        self.assertNotIn("<script", body)
-        self.assertNotIn("<img src=x", body)
-        self.assertNotIn('href="javascript:', body)
-        self.assertNotIn('href="/Users/', body)
-        self.assertNotIn('src="/Users/', body)
-        self.assertIn('href="https://example.com/a"', body)
-        self.assertIn('href="#onyx-unpublished"', body)
+        # The page's one script is the renderer; the answer rides as escaped text in its card.
+        self.assertEqual(html.count("<script"), 1)
+        self.assertNotIn("<img src=x", html)
+        self.assertIn("&lt;script&gt;alert(1)&lt;/script&gt;", html)
+        node = shutil.which("node")
+        if node is None:
+            self.skipTest("node is needed to run the renderer the phone runs")
+        # The renderer the phone runs, on the text the card carries (textContent is the unescaped answer).
+        from onyx import panels_ui
+
+        script = f"const md={panels_ui.answer_markdown()};process.stdout.write(md(require('fs').readFileSync(0,'utf8')))"
+        out = subprocess.run([node, "-e", script], input=answer, capture_output=True, text=True, check=True).stdout
+        self.assertNotIn("<script", out)
+        self.assertNotIn("<img", out)
+        self.assertNotIn('href="javascript:', out)
+        self.assertIn('href="https://example.com/a"', out)
+        self.assertIn("<strong>bold</strong>", out)
+
+    def test_mirror_threads_draw_as_the_macs_saved_answers(self) -> None:
+        from onyx import vault_look
+
+        history = FakeHistory([], [
+            conversation("r1", str(self.shown), started=1.0),
+            conversation("f1", str(self.shown), started=2.0, parent="r1", question="And then?"),
+        ])
+        look = vault_look.palette({"mode": "dark", "styles": {"content": {"background-color": "rgb(26, 26, 26)",
+                                                                          "color": "rgb(220, 220, 220)"}}}, None)
+        html = build_library(history, built=self.built, ids=ids, look=look, chats=True).pages[0].data.decode()
+        self.assertEqual(html.count('<article class="turn">'), 2)
+        self.assertEqual(html.count("<h4>Passage</h4>"), 1, "a follow-up on the same passage doesn't repeat it")
+        self.assertEqual(html.count("<h4>Question</h4>"), 2)
+        self.assertEqual(html.count("<h4>Answer</h4>"), 2)
+        self.assertIn('<span class="badge">Question</span>', html)
+        self.assertIn(f'href="{self.shown_id}">Open document</a>', html)
+        self.assertIn("<title>Shown</title>", html, "titled by its document, as the Mac's detail is")
+        self.assertIn(f"--bg-primary:{look['tokens']['--bg-primary']}", html)
+        self.assertIn("color-scheme:dark", html)
+        self.assertIn(".hist-answer", html, "the Mac's card rules, from panels_ui")
 
     def test_mirror_library_build_is_deterministic(self) -> None:
         history = FakeHistory([{"source": str(self.shown), "last_opened_at": 1.0}],
