@@ -72,6 +72,19 @@ jobs:
       - run: npm run build
       - run: npm test
 
+  # The phone mirror's Worker: the only door onto the bucket, so its refusals are tested here. No dependencies.
+  mirror-worker:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: integrations/mirror-worker
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+      - run: node --test
+
   bundle:
     runs-on: macos-14
     steps:

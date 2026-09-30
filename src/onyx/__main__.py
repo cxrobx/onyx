@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import sys
 import threading
 import time
 from pathlib import Path
@@ -39,6 +40,11 @@ def _watch_parent(parent_pid: int) -> None:
 
 
 def main() -> None:
+    if sys.argv[1:2] == ["mirror"]:
+        # `onyx mirror …` is its own command line (the phone mirror); the server's flags don't apply to it.
+        from .mirror.cli import main as mirror_main
+
+        raise SystemExit(mirror_main(sys.argv[2:]))
     parser = argparse.ArgumentParser(
         prog="onyx",
         description="Local server for the highlight-to-ask reading companion widget.",
@@ -101,6 +107,7 @@ def main() -> None:
         allow_any=args.allow_any,
         data_dir=Path(args.data_dir).expanduser().resolve() if args.data_dir else None,
         first_run=True,
+        mirror=True,
     )
     app = create_app(config)
 

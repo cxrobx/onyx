@@ -47,11 +47,14 @@ wrong, as with the rest of `AGENTS.md`.
    (`pip install onyx[mirror]`), imported lazily inside the mirror module, so a
    normal install doesn't even contain the code path's requirements.
 3. **An explicit include list, never "the whole vault".** `mirror.toml` names the
-   folders to publish. There is no default list. Always excluded: dot-folders
-   (`.obsidian`, `.trash`, plugin caches such as `.smart-env`), and any note whose
-   frontmatter says `mirror: false`. An included folder's symlinks are followed
-   only to targets that are themselves inside an included root, checked after
-   `resolve()` and by path components, as `config.resolve_allowed` already does.
+   paths to publish. There is no default list. A page is published only if
+   Onyx's own vault index (`vault.VaultIndex`, what the sidebar lists) has it
+   under an included path, so the mirror never walks the disk on its own and
+   follows exactly the links the vault already follows: an Artifacts entry is a
+   symlink the owner made on purpose, and a linked folder in the notes vault is
+   one the sidebar already shows. Always excluded: anything under a dot-folder
+   (`.obsidian`, `.trash`, plugin caches such as `.smart-env`), any path under an
+   `exclude` entry, and any note whose frontmatter says `mirror: false`.
 4. **Assets: only what a page references.** A page's images and files go up only
    if the page itself references them, the same boundary `/_fs` enforces
    (`prepare_html`'s asset sink). The mirror never uploads a folder wholesale.
@@ -76,6 +79,79 @@ wrong, as with the rest of `AGENTS.md`.
 9. **A kill switch.** `onyx mirror stop` turns publishing off. `onyx mirror wipe`
    deletes every object in the bucket. Rotating the encryption key makes every old
    copy, anywhere, unreadable. Revoking the phone token locks the app.
+
+## Wire format v1
+
+The Mac, the Worker and the phone agree on exactly this. Changing any of it is a
+new version (`v` in the index, the salt below, and the pairing prefix together).
+
+**Keys.** One random 32-byte master key `M`. Two keys derive from it with
+HKDF-SHA256, salt `b"onyx-mirror/v1"`, 32 bytes each:
+`K_enc` with info `b"enc"`, `K_id` with info `b"id"`.
+
+**Object ids.** `id(name) = hex(HMAC-SHA256(K_id, utf8(name)))`, 64 lowercase
+hex characters. Names:
+- `index` for the index;
+- `page:` + the page's mirror path, which is `Notes/<path in the vault>` or
+  `Artifacts/<path of its entry in Artifacts>` (POSIX separators);
+- `asset:` + the asset file's realpath.
+
+**Blobs.** `blob = nonce(12 random bytes) ‖ AES-256-GCM(K_enc, nonce, plaintext,
+aad = ascii(id))`, the ciphertext followed by its 16-byte tag. This is Python
+`AESGCM(K_enc).encrypt(nonce, data, id.encode())` with the nonce prepended, and
+CryptoKit `AES.GCM.SealedBox(combined: blob)` opened with
+`authenticating: Data(id.utf8)`. The id as AAD binds each blob to its name, so a
+store that swaps two objects makes both fail to open.
+
+**Storage and fetch.** R2 key `o/<id>`. The Worker serves `GET`/`HEAD`
+`/o/<id>` with `Authorization: Bearer <read token>`: 200 with the blob, an
+`ETag`, `Cache-Control: no-store`; 304 on a matching `If-None-Match`; 404 for
+everything else, a bad or missing token included.
+
+**Index.** The plaintext is raw DEFLATE (RFC 1951, no zlib header: Python
+`zlib.compressobj(wbits=-15)`, Apple `NSData.decompressed(using: .zlib)`) of
+UTF-8 JSON:
+
+```json
+{
+  "v": 1,
+  "published_at": "2026-09-30T12:00:00Z",
+  "pages": [{"id": "…", "path": "Notes/Folder/Note.md", "title": "Note",
+             "kind": "markdown", "sha": "…", "size": 1234,
+             "mtime": 1790000000.0, "text": "plain text for search"}],
+  "assets": [{"id": "…", "mime": "image/png", "sha": "…", "size": 5678}]
+}
+```
+
+`kind` is `markdown`, `html` or `text`. `sha` is SHA-256 hex of the **blob**
+(what the phone stores), `size` its byte length. `text` is at most 20,000
+characters. A blob is re-encrypted only when its plaintext changes, so an
+unchanged page keeps its `sha` and the phone doesn't download it again.
+
+**Pages.** UTF-8 HTML, complete documents. A link to another published page is
+the relative `href="<id>"` (plus `#fragment`); an image or other asset is
+`src="<id>"`; a link to a page that isn't published is
+`href="#onyx-unpublished"`. The phone serves every object at
+`onyx-mirror://o/<id>`, so relative ids resolve with no scheme in the page.
+
+**Pairing.** `onyxmirror1:` + base64url, no padding, of JSON
+`{"u": "<Worker base URL, no trailing slash>", "t": "<read token>",
+"k": "<base64url M, no padding>"}`. The Mac shows it as a QR code in the
+terminal (`onyx mirror pair`) or copies it (`--copy`); the phone scans or pastes
+it and keeps it in its Keychain.
+
+**Mac-side config.** `~/Library/Application Support/Onyx/mirror.toml`:
+
+```toml
+enabled = true
+interval_minutes = 5
+include = ["Notes/Areas", "Artifacts"]   # mirror paths; "Notes" is the whole vault
+exclude = []
+```
+
+Keychain service `onyx-mirror`, one item per account: `master_key`,
+`read_token`, `worker_url`, `r2_account_id`, `r2_bucket`, `r2_access_key_id`,
+`r2_secret_access_key`.
 
 ## Pieces
 

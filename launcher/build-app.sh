@@ -2,6 +2,7 @@
 # Build a self-contained "Onyx.app" and install it to /Applications.
 #   ./launcher/build-app.sh          # build + install
 #   ./launcher/build-app.sh --no-install
+#   ./launcher/build-app.sh --with-mirror     # also bundle the phone mirror's dependencies (or ONYX_WITH_MIRROR=1)
 #
 # Release signing is opt-in:
 #   ONYX_SIGN_IDENTITY="Developer ID Application: …" ./launcher/build-app.sh
@@ -24,6 +25,18 @@ NOTARY_PROFILE="${ONYX_NOTARY_PROFILE:-}"
 APP_VERSION="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$DIR/Info.plist")"
 BUILD_ARCH="$(uname -m)"
 
+# The phone mirror is opt-in: its cryptography and QR dependencies go into the bundle only on request,
+# so a default build is the build it was (docs/plans/phone-mirror.md, gate 2).
+WITH_MIRROR="${ONYX_WITH_MIRROR:-0}"
+NO_INSTALL=0
+for arg in "$@"; do
+  case "$arg" in
+    --no-install) NO_INSTALL=1 ;;
+    --with-mirror) WITH_MIRROR=1 ;;
+  esac
+done
+MIRROR_BUNDLE_ARGS=()
+
 if [ ! -x "$BUILDER_VENV/bin/python" ]; then
   echo "→ Creating isolated bundler environment…"
   python3 -m venv "$BUILDER_VENV"
@@ -37,6 +50,15 @@ PYTHON_APP_VERSION="$(PYTHONPATH="$ROOT/src" "$BUILDER_VENV/bin/python" -c \
 if [ "$PYTHON_APP_VERSION" != "$APP_VERSION" ]; then
   echo "Version mismatch: Python=$PYTHON_APP_VERSION, Info.plist=$APP_VERSION" >&2
   exit 1
+fi
+
+if [ "$WITH_MIRROR" = 1 ]; then
+  echo "→ Adding the phone mirror's dependencies to the bundler environment…"
+  "$BUILDER_VENV/bin/python" -m pip install --disable-pip-version-check \
+    "cryptography>=42" "segno>=1.6"
+  # onyx.mirror is imported only inside functions and behind mirror.toml, and cryptography ships a compiled
+  # backend, so name them all rather than rely on what the import scan happens to find.
+  MIRROR_BUNDLE_ARGS=(--collect-submodules onyx.mirror --collect-all cryptography --collect-all segno)
 fi
 
 echo "→ Cleaning…"
@@ -61,6 +83,7 @@ echo "→ Bundling self-contained local service…"
   --collect-all markdown_it \
   --collect-all uvicorn \
   --collect-all pypdf \
+  ${MIRROR_BUNDLE_ARGS[@]+"${MIRROR_BUNDLE_ARGS[@]}"} \
   --distpath "$SERVER_DIST" \
   --workpath "$BUILD/pyinstaller-work" \
   --specpath "$BUILD" \
@@ -174,7 +197,7 @@ fi
   LC_ALL=C shasum -a 256 "$(basename "$ALFRED_WORKFLOW")" > "$(basename "$ALFRED_WORKFLOW").sha256"
 )
 
-if [ "${1:-}" = "--no-install" ]; then
+if [ "$NO_INSTALL" = 1 ]; then
   echo "✓ Built: $BUNDLE"
   echo "✓ Archive: $ARCHIVE"
   echo "✓ Disk image: $DMG"

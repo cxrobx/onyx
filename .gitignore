@@ -10,3 +10,6 @@ tmp/
 integrations/obsidian/node_modules/
 integrations/obsidian/main.js
 editor/node_modules/
+integrations/mirror-worker/wrangler.toml
+integrations/mirror-worker/node_modules/
+integrations/mirror-worker/.wrangler/

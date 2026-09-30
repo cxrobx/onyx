@@ -105,6 +105,30 @@ write only within the vault and never through a symlink target.
 → `test_link_and_folder_routes_write_only_inside_the_vault`,
 `test_reorganising_moves_only_what_the_vault_owns_and_never_a_target`
 
+**The phone mirror is inert, fenced and sealed.** `src/onyx/mirror/` publishes an
+encrypted, read-only copy of the vault for a phone (`docs/plans/phone-mirror.md`,
+whose "Wire format v1" the Mac, the Worker in `integrations/mirror-worker/` and the
+iOS app all implement). This repo is public, so it does nothing unless the real
+entry point runs (`AppConfig.mirror`) *and* `mirror.toml` in the data dir says
+`enabled = true` with a non-empty `include`. A page is published only if the vault
+index lists it under an included path; an asset only if a published page references
+it and it lives under the home folder. Every byte and every object name leaving the
+Mac is encrypted or HMAC'd. Credentials live only in the Keychain (service
+`onyx-mirror`, written through `security -i` on stdin, never argv) and never reach
+settings, diagnostics, logs or reports. No endpoint, bucket or token is ever
+tracked. The Worker answers only an authenticated `GET`/`HEAD /o/<id>`, and 404s
+everything else.
+→ `test_mirror_is_inert_without_its_config`,
+`test_mirror_publishes_only_included_folders`,
+`test_mirror_uploads_only_assets_a_page_references`,
+`test_mirror_assets_stay_inside_home`,
+`test_mirror_sends_no_plaintext`,
+`test_mirror_credentials_never_reach_settings_or_logs`,
+`test_keychain_writes_keep_values_off_argv`,
+`test_repo_tracks_no_private_endpoint`,
+`test_mirror_crypto_matches_the_shared_vectors`, and the Worker's
+`node --test` in `integrations/mirror-worker`
+
 **Subscription-only execution.** Claude runs through a signed-in claude.ai
 session and Codex through ChatGPT. API-key environment variables are stripped and
 non-subscription sessions are rejected, deliberately, so the app can never bill

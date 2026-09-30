@@ -1,0 +1,42 @@
+{
+  "_note": "Synthetic vectors for wire format v1 (docs/plans/phone-mirror.md). The key is bytes 0..31, not a real key.",
+  "master_key_b64url": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "k_enc_hex": "c7b503087070f83881caa48d6011cd5ec551b6aa7116a954b06ec45291e2758f",
+  "k_id_hex": "3ab686b2f083c4f555d2d0f0c00b32441bfb8780d19255e4fd7063963bb780b9",
+  "ids": {
+    "index": "a4f4300a433646fd2ddcc7d587452c15fdfbf084a235f2d743a82cf7056ad4c7",
+    "page:Notes/Folder/Hello.md": "42ec6ae49936c2ff3b425b74fd52278efab57426fbca3c21b7742b5a97586ded",
+    "asset:/tmp/pic.png": "287934bc3829ae8232eb4becfec2f50b92e576721a6cc1922584b47c4e5e785d"
+  },
+  "page": {
+    "id": "42ec6ae49936c2ff3b425b74fd52278efab57426fbca3c21b7742b5a97586ded",
+    "plaintext_utf8": "<!doctype html><html><head><meta charset=utf-8><title>Hello</title></head><body><p>Café ✓</p></body></html>",
+    "blob_b64": "BwcHBwcHBwcHBwcHUGAF/scBCrEI2DoR7EFBg0xkKZdhlweoSimGO7nCZkiu6czy+lHd9tfzBZBb8UFWafnlh0moWiO/cwe93eAMOtSDHzmv8roh1eL4Q9kOnouCCgkVOYV90flBvx+ckaN2JoBwav4Z2z+BSb5s9VS4MGRmGSSAlIXK1gEyqEt4"
+  },
+  "index": {
+    "id": "a4f4300a433646fd2ddcc7d587452c15fdfbf084a235f2d743a82cf7056ad4c7",
+    "json": {
+      "v": 1,
+      "published_at": "2026-09-30T12:00:00Z",
+      "pages": [
+        {
+          "id": "42ec6ae49936c2ff3b425b74fd52278efab57426fbca3c21b7742b5a97586ded",
+          "path": "Notes/Folder/Hello.md",
+          "title": "Hello",
+          "kind": "markdown",
+          "sha": "b4a4e4fb77ceeee91664755d4b92cf943b18d3baad36d0ec7e5265f8959df530",
+          "size": 138,
+          "mtime": 1790000000.0,
+          "text": "Hello Café ✓"
+        }
+      ],
+      "assets": []
+    },
+    "blob_b64": "BwcHBwcHBwcHBwcHUdEq36dEY4XCyqD/pdMEIwkCJj7VvkePRvYlX01usvHyzjDAOMe6HmkdAeSaQDuhhuq/vplsVhgapQvW7+0bP/ssGgnPyvViLa55gcBLD4hdEX29I8Nzf4Jv9nzYnPp8uUv6MDrUs2thQt5P64/32t/UPG+h6Yh731pnhkEkXpW5+0MDGOIX534BgM20ZaiunVCOkzxnDJYeECdMbASD6pllhlIMFEJ8rr5JWVGBOktfZ0WBRNNoAetwKc6HPQJ3Ak4A9SBVzJa/qROoo5czPP/VtkwJjhkHbmuT3774//7hDz7oQMe+To7WDCBFedt7eVPNFGFgXlHxAdsf4SiT6LOWmTx8jIhIpK/FpbukO572uA9FBfI="
+  },
+  "pairing": {
+    "string": "onyxmirror1:eyJ1IjoiaHR0cHM6Ly9taXJyb3IuZXhhbXBsZS53b3JrZXJzLmRldiIsInQiOiJ0ZXN0LXJlYWQtdG9rZW4iLCJrIjoiQUFFQ0F3UUZCZ2NJQ1FvTERBME9EeEFSRWhNVUZSWVhHQmthR3h3ZEhoOCJ9",
+    "u": "https://mirror.example.workers.dev",
+    "t": "test-read-token"
+  }
+}

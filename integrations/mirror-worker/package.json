@@ -1,0 +1,11 @@
+{
+  "name": "onyx-mirror-worker",
+  "version": "0.1.0",
+  "description": "Read-only Cloudflare Worker that serves Onyx's encrypted phone-mirror blobs from R2.",
+  "license": "BUSL-1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test"
+  }
+}

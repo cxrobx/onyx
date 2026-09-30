@@ -293,7 +293,19 @@ def create_app(config: AppConfig) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(_app: FastAPI):
+        # The phone mirror's publisher. It starts only when the real entry point asked (config.mirror) and
+        # mirror.toml says enabled = true; otherwise no thread, no file, no network (mirror/service.py).
+        publisher = None
+        if config.mirror:
+            from .mirror import service as mirror_service
+
+            publisher = mirror_service.start(
+                storage,
+                lambda: mirror_service.roots_from_settings(storage.settings(model_default=config.model)),
+            )
         yield
+        if publisher is not None:
+            publisher.stop()
         storage.close()
 
     app = FastAPI(title="Onyx", version=__version__, lifespan=lifespan)

@@ -20,6 +20,9 @@ dependencies = [
 [project.optional-dependencies]
 fast = ["uvicorn[standard]>=0.27"]
 bundle = ["pyinstaller>=6.0"]
+# The read-only phone mirror (docs/plans/phone-mirror.md). Imported only inside src/onyx/mirror, only when
+# mirror.toml turns it on, so a normal install never needs either.
+mirror = ["cryptography>=42", "segno>=1.6"]
 test = ["httpx2>=2.0", "reportlab>=4.0"]
 
 [project.scripts]
