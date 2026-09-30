@@ -1123,6 +1123,86 @@ class CliTests(MirrorTestCase):
         self.assertNotIn("cloudflarestorage", out + err)
 
 
+# -- the look: the phone wears what the Mac app wears ---------------------------------------------------
+
+LOOK_VECTORS = json.loads((Path(__file__).parent / "fixtures" / "mirror_look_vectors.json").read_text(encoding="utf-8"))
+# A reading-view and explorer snapshot, in the shape the Obsidian plugin posts (markdown_theme / sidebar_theme).
+MARKDOWN_SNAPSHOT = {"mode": "light", "styles": {"content": {"background-color": "rgb(253, 246, 227)",
+                                                             "color": "rgb(0, 43, 54)"},
+                                                 "a": {"color": "rgb(203, 75, 22)"}}}
+SIDEBAR_SNAPSHOT = {"mode": "light", "styles": {"pane": {"background-color": "rgb(238, 232, 213)",
+                                                         "color": "rgb(0, 43, 54)",
+                                                         "font-family": '"JetBrains Mono", sans-serif'}}}
+
+
+class FakeThemeStorage:
+    """The three Storage calls look_for makes, by their real names."""
+
+    def __init__(self, settings: dict, markdown=MARKDOWN_SNAPSHOT, sidebar=SIDEBAR_SNAPSHOT) -> None:
+        self._settings, self._markdown, self._sidebar = settings, markdown, sidebar
+
+    def settings(self, **_) -> dict:
+        return dict(self._settings)
+
+    def markdown_theme(self, root):
+        return self._markdown
+
+    def sidebar_theme(self, root):
+        return self._sidebar
+
+
+class LookTests(MirrorTestCase):
+    def test_the_page_look_vectors_are_what_the_mac_computes(self) -> None:
+        # The iOS app ports palette() and must reproduce this file, so it has to stay what the Mac actually computes.
+        from onyx import vault_look
+
+        self.assertEqual(LOOK_VECTORS["onyx_blue"], vault_look.ONYX_BLUE)
+        for case in LOOK_VECTORS["cases"]:
+            computed = vault_look.palette({"styles": {
+                "content": {"background-color": case["background"], "color": case["ink"]},
+                "a": {"color": case["link"] or vault_look.ONYX_BLUE},
+            }}, None)
+            self.assertEqual(computed, case["look"], case["name"])
+
+    def test_the_phone_gets_the_vault_look_only_while_the_mac_wears_it(self) -> None:
+        from onyx import vault_look
+
+        roots = {"Notes": self.base}
+        on = service.look_for(FakeThemeStorage({"appearance_theme": "dark"}), roots)
+        self.assertEqual(on["vault"], vault_look.palette(MARKDOWN_SNAPSHOT, SIDEBAR_SNAPSHOT))
+        self.assertEqual(on["vault"]["tokens"]["--ui-font"], '"JetBrains Mono", sans-serif')
+        self.assertEqual((on["follow_page"], on["appearance"]), (True, "dark"))
+
+        off = service.look_for(FakeThemeStorage({"markdown_follow_obsidian": False, "sidebar_follow_obsidian": False,
+                                                 "html_follow_page": False, "appearance_theme": "bogus"}), roots)
+        self.assertEqual(off, {"vault": None, "follow_page": False, "appearance": "system"})
+        # Either switch keeps it on, as current_vault_look reads them.
+        one = service.look_for(FakeThemeStorage({"markdown_follow_obsidian": False}), roots)
+        self.assertIsNotNone(one["vault"])
+        self.assertIsNone(service.look_for(FakeThemeStorage({}), {})["vault"])  # no notes vault, nothing to wear
+
+    @needs_extra
+    def test_a_theme_change_republishes_only_the_index(self) -> None:
+        world, store = World(), RecordingStore(self.base / "out")
+        world.page("Notes/a.md", "<p>a</p>")
+        look = {"vault": {"mode": "light", "base": [1, 2, 3], "tokens": {"--ink": "0 0 0"}},
+                "follow_page": True, "appearance": "system"}
+
+        def run(look_value) -> None:
+            publish(config=CONFIG, secrets=self.secrets, store=store, roots={"Notes": self.base},
+                    markdown_css=None, data_dir=self.data, build=world.build, now=NOW, look=look_value)
+
+        run(look)
+        self.assertEqual(self.read_index(store)["look"], look)
+        index_id = self.keys().ident("index")
+        store.ops.clear()
+        run(look)
+        self.assertEqual(store.ops, [], "an unchanged look must not re-send the index")
+        run({**look, "vault": {**look["vault"], "mode": "dark"}})
+        self.assertEqual(store.ops, [("put", index_id)], "a changed look re-sends the index and nothing else")
+        self.assertEqual(self.read_index(store)["look"]["vault"]["mode"], "dark")
+
+
 # -- the signer and the R2 client ----------------------------------------------------------------------
 
 AWS_KEY, AWS_SECRET = "AKIAIOSFODNN7EXAMPLE", "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"

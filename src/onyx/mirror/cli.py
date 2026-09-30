@@ -185,7 +185,8 @@ def cmd_publish(args, secrets, data_dir) -> int:
     try:
         roots = service.roots_from_settings(db.settings())
         report = publish(config=config, secrets=secrets, store=store, roots=roots,
-                         markdown_css=service.markdown_css_for(db, roots), data_dir=db.data_dir)
+                         markdown_css=service.markdown_css_for(db, roots), data_dir=db.data_dir,
+                         look=service.look_for(db, roots))
     finally:
         db.close()
     _say(f"Published {report.pages} pages and {report.assets} assets: {report.uploaded} uploaded "

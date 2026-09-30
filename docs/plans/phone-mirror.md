@@ -128,6 +128,35 @@ UTF-8 JSON:
 characters. A blob is re-encrypted only when its plaintext changes, so an
 unchanged page keeps its `sha` and the phone doesn't download it again.
 
+**Look (optional, added 2026-09-30).** The index may carry `"look"`, so the phone
+wears what the Mac app wears. A phone that doesn't know it ignores it, so it is still
+v1:
+
+```json
+"look": {
+  "vault": {"mode": "light", "base": [253, 246, 227], "tokens": {"--bg-primary": "253 246 227", "…": "…"}},
+  "follow_page": true,
+  "appearance": "system"
+}
+```
+
+- `vault` is `vault_look.palette(markdown snapshot, sidebar snapshot)` exactly as the
+  Mac computes it (`current_vault_look`): `mode`, `base`, and `tokens`, whose values
+  are space-separated RGB triplets (`"253 246 227"`), `rgb(r g b/.14)` strings for
+  `--line`, `--line-soft` and `--selected`, and a CSS font list for the optional
+  `--ui-font`. It is `null` when "Match vault appearance" is off or the snapshots
+  give no readable palette. While it is set, the whole app, its web views included,
+  takes `mode`, as the Mac's window does.
+- `follow_page` is the Mac's "follow the page" setting (`html_follow_page`). While
+  it is on, an HTML page's measured colours (the page's opaque body ground, or the
+  root's when the body is transparent; none when either has a background image; the
+  body's text colour; the first visible link's colour, or Onyx blue
+  `rgb(58, 131, 247)` when there is none) go through the same palette rules as
+  `POST /api/page-look`. The chrome wears that palette while the page is showing.
+  `tests/fixtures/mirror_look_vectors.json` holds the cases a port must reproduce.
+- `appearance` is the Mac's app theme (`system`, `light` or `dark`), used when
+  `vault` is `null`.
+
 **Pages.** UTF-8 HTML, complete documents. A link to another published page is
 the relative `href="<id>"` (plus `#fragment`); an image or other asset is
 `src="<id>"`; a link to a page that isn't published is

@@ -174,7 +174,7 @@ def _index_entries(current: dict, known: dict) -> tuple[list[dict], list[dict]]:
 
 def publish(*, config: MirrorConfig, secrets: keychain.Secrets, store: Store, roots: dict[str, Path],
             markdown_css: str | None, data_dir: Path, build: Callable | None = None,
-            now: datetime | None = None) -> PublishReport:
+            now: datetime | None = None, look: dict | None = None) -> PublishReport:
     master = secrets.get(keychain.MASTER_KEY)
     if not master:
         raise MirrorNotConfigured("master_key is missing from the Keychain (run `onyx mirror setup --generate`)")
@@ -225,10 +225,12 @@ def publish(*, config: MirrorConfig, secrets: keychain.Secrets, store: Store, ro
                 assets = sorted(assets + more_assets, key=lambda entry: entry["id"])
                 keep |= {entry["id"] for entry in (*more_pages, *more_assets)}
             body = {"v": INDEX_VERSION, "pages": pages, "assets": assets}
+            if look is not None:
+                body["look"] = look  # a theme change in Obsidian is a change the phone should get
             # Changes, not time: a publish that finds nothing new leaves the index, and the phone's copy, alone.
             key = _sha((index_id + "\0" + json.dumps(body, sort_keys=True, ensure_ascii=False)).encode("utf-8"))
             if (state["index"] or {}).get("key") != key:
-                index = {"v": INDEX_VERSION, "published_at": published_at, "pages": pages, "assets": assets}
+                index = {"v": INDEX_VERSION, "published_at": published_at, **body}  # v first, as documented
                 blob = keys.seal(index_id, deflate_raw(json.dumps(index, ensure_ascii=False).encode("utf-8")))
                 store.put(index_id, blob)
                 _write_private(sealed_index_path(data_dir, store.destination), blob)

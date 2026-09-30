@@ -1,0 +1,331 @@
+{
+  "_note": "Page-look vectors: vault_look.palette on a page's measured colours, as POST /api/page-look computes it. The iOS app's port must reproduce each `look` exactly (null = keep the vault look). Regenerate only together with vault_look.py; tests/test_mirror_look.py checks this file against it.",
+  "onyx_blue": "rgb(58, 131, 247)",
+  "cases": [
+    {
+      "name": "light page with a link",
+      "background": "rgb(255, 255, 255)",
+      "ink": "rgb(38, 36, 33)",
+      "link": "rgb(0, 102, 204)",
+      "look": {
+        "mode": "light",
+        "base": [
+          255,
+          255,
+          255
+        ],
+        "tokens": {
+          "--bg-primary": "255 255 255",
+          "--bg-sidebar": "255 255 255",
+          "--bg-surface": "247 247 247",
+          "--bg-elevated": "255 255 255",
+          "--bg-input": "247 247 247",
+          "--ink": "38 36 33",
+          "--secondary": "99 97 95",
+          "--muted": "144 143 142",
+          "--faint": "179 178 177",
+          "--line": "rgb(38 36 33/.14)",
+          "--line-soft": "rgb(38 36 33/.07)",
+          "--selected": "rgb(38 36 33/.08)",
+          "--accent": "0 102 204",
+          "--accent-hover": "10 86 161",
+          "--button-bg": "38 36 33",
+          "--button-hover": "77 75 73",
+          "--button-ink": "255 255 255"
+        }
+      }
+    },
+    {
+      "name": "solarized light",
+      "background": "rgb(253, 246, 227)",
+      "ink": "rgb(0, 43, 54)",
+      "link": "rgb(203, 75, 22)",
+      "look": {
+        "mode": "light",
+        "base": [
+          253,
+          246,
+          227
+        ],
+        "tokens": {
+          "--bg-primary": "253 246 227",
+          "--bg-sidebar": "253 246 227",
+          "--bg-surface": "244 239 221",
+          "--bg-elevated": "253 246 227",
+          "--bg-input": "244 239 221",
+          "--ink": "0 43 54",
+          "--secondary": "68 98 101",
+          "--muted": "121 140 137",
+          "--faint": "164 175 166",
+          "--line": "rgb(0 43 54/.14)",
+          "--line-soft": "rgb(0 43 54/.07)",
+          "--selected": "rgb(0 43 54/.08)",
+          "--accent": "203 75 22",
+          "--accent-hover": "152 67 30",
+          "--button-bg": "0 43 54",
+          "--button-hover": "46 80 85",
+          "--button-ink": "253 246 227"
+        }
+      }
+    },
+    {
+      "name": "dark page",
+      "background": "rgb(26, 26, 26)",
+      "ink": "rgb(196, 197, 181)",
+      "link": "rgb(90, 160, 255)",
+      "look": {
+        "mode": "dark",
+        "base": [
+          26,
+          26,
+          26
+        ],
+        "tokens": {
+          "--bg-primary": "26 26 26",
+          "--bg-sidebar": "26 26 26",
+          "--bg-surface": "32 32 31",
+          "--bg-elevated": "34 35 34",
+          "--bg-input": "32 32 31",
+          "--ink": "196 197 181",
+          "--secondary": "152 153 141",
+          "--muted": "106 106 99",
+          "--faint": "79 79 74",
+          "--line": "rgb(196 197 181/.14)",
+          "--line-soft": "rgb(196 197 181/.07)",
+          "--selected": "rgb(196 197 181/.08)",
+          "--accent": "90 160 255",
+          "--accent-hover": "116 169 236",
+          "--button-bg": "53 53 51",
+          "--button-hover": "67 67 63",
+          "--button-ink": "196 197 181"
+        }
+      }
+    },
+    {
+      "name": "no link keeps Onyx blue",
+      "background": "rgb(250, 250, 250)",
+      "ink": "rgb(20, 20, 20)",
+      "link": "",
+      "look": {
+        "mode": "light",
+        "base": [
+          250,
+          250,
+          250
+        ],
+        "tokens": {
+          "--bg-primary": "250 250 250",
+          "--bg-sidebar": "250 250 250",
+          "--bg-surface": "242 242 242",
+          "--bg-elevated": "250 250 250",
+          "--bg-input": "242 242 242",
+          "--ink": "20 20 20",
+          "--secondary": "96 96 96",
+          "--muted": "140 140 140",
+          "--faint": "174 174 174",
+          "--line": "rgb(20 20 20/.14)",
+          "--line-soft": "rgb(20 20 20/.07)",
+          "--selected": "rgb(20 20 20/.08)",
+          "--accent": "58 131 247",
+          "--accent-hover": "48 103 190",
+          "--button-bg": "20 20 20",
+          "--button-hover": "61 61 61",
+          "--button-ink": "250 250 250"
+        }
+      }
+    },
+    {
+      "name": "faint link falls back to ink",
+      "background": "rgb(255, 255, 255)",
+      "ink": "rgb(30, 30, 30)",
+      "link": "rgb(230, 230, 240)",
+      "look": {
+        "mode": "light",
+        "base": [
+          255,
+          255,
+          255
+        ],
+        "tokens": {
+          "--bg-primary": "255 255 255",
+          "--bg-sidebar": "255 255 255",
+          "--bg-surface": "247 247 247",
+          "--bg-elevated": "255 255 255",
+          "--bg-input": "247 247 247",
+          "--ink": "30 30 30",
+          "--secondary": "98 98 98",
+          "--muted": "142 142 142",
+          "--faint": "178 178 178",
+          "--line": "rgb(30 30 30/.14)",
+          "--line-soft": "rgb(30 30 30/.07)",
+          "--selected": "rgb(30 30 30/.08)",
+          "--accent": "30 30 30",
+          "--accent-hover": "30 30 30",
+          "--button-bg": "30 30 30",
+          "--button-hover": "70 70 70",
+          "--button-ink": "255 255 255"
+        }
+      }
+    },
+    {
+      "name": "translucent ink composited",
+      "background": "rgb(240, 240, 240)",
+      "ink": "rgba(0, 0, 0, 0.8)",
+      "link": "rgb(180, 30, 30)",
+      "look": {
+        "mode": "light",
+        "base": [
+          240,
+          240,
+          240
+        ],
+        "tokens": {
+          "--bg-primary": "240 240 240",
+          "--bg-sidebar": "240 240 240",
+          "--bg-surface": "233 233 233",
+          "--bg-elevated": "240 240 240",
+          "--bg-input": "233 233 233",
+          "--ink": "48 48 48",
+          "--secondary": "90 90 90",
+          "--muted": "132 132 132",
+          "--faint": "167 167 167",
+          "--line": "rgb(48 48 48/.14)",
+          "--line-soft": "rgb(48 48 48/.07)",
+          "--selected": "rgb(48 48 48/.08)",
+          "--accent": "180 30 30",
+          "--accent-hover": "147 34 34",
+          "--button-bg": "48 48 48",
+          "--button-hover": "83 83 83",
+          "--button-ink": "240 240 240"
+        }
+      }
+    },
+    {
+      "name": "near-black mode inferred dark",
+      "background": "rgb(0, 0, 0)",
+      "ink": "rgb(255, 255, 255)",
+      "link": "rgb(255, 100, 0)",
+      "look": {
+        "mode": "dark",
+        "base": [
+          0,
+          0,
+          0
+        ],
+        "tokens": {
+          "--bg-primary": "0 0 0",
+          "--bg-sidebar": "0 0 0",
+          "--bg-surface": "9 9 9",
+          "--bg-elevated": "13 13 13",
+          "--bg-input": "9 9 9",
+          "--ink": "255 255 255",
+          "--secondary": "138 138 138",
+          "--muted": "94 94 94",
+          "--faint": "69 69 69",
+          "--line": "rgb(255 255 255/.14)",
+          "--line-soft": "rgb(255 255 255/.07)",
+          "--selected": "rgb(255 255 255/.08)",
+          "--accent": "255 100 0",
+          "--accent-hover": "255 139 64",
+          "--button-bg": "41 41 41",
+          "--button-hover": "61 61 61",
+          "--button-ink": "255 255 255"
+        }
+      }
+    },
+    {
+      "name": "mid grey ground",
+      "background": "rgb(128, 128, 128)",
+      "ink": "rgb(0, 0, 0)",
+      "link": "rgb(255, 255, 255)",
+      "look": {
+        "mode": "light",
+        "base": [
+          128,
+          128,
+          128
+        ],
+        "tokens": {
+          "--bg-primary": "128 128 128",
+          "--bg-sidebar": "128 128 128",
+          "--bg-surface": "124 124 124",
+          "--bg-elevated": "128 128 128",
+          "--bg-input": "124 124 124",
+          "--ink": "0 0 0",
+          "--secondary": "0 0 0",
+          "--muted": "50 50 50",
+          "--faint": "78 78 78",
+          "--line": "rgb(0 0 0/.14)",
+          "--line-soft": "rgb(0 0 0/.07)",
+          "--selected": "rgb(0 0 0/.08)",
+          "--accent": "255 255 255",
+          "--accent-hover": "191 191 191",
+          "--button-bg": "0 0 0",
+          "--button-hover": "23 23 23",
+          "--button-ink": "128 128 128"
+        }
+      }
+    },
+    {
+      "name": "unreadable ink gives no look",
+      "background": "rgb(255, 255, 255)",
+      "ink": "rgb(200, 200, 200)",
+      "link": "rgb(0, 0, 255)",
+      "look": null
+    },
+    {
+      "name": "translucent ground gives no look",
+      "background": "rgba(255, 255, 255, 0.5)",
+      "ink": "rgb(0, 0, 0)",
+      "link": "rgb(0, 0, 255)",
+      "look": null
+    },
+    {
+      "name": "transparent ink gives no look",
+      "background": "rgb(255, 255, 255)",
+      "ink": "rgba(0, 0, 0, 0)",
+      "link": "rgb(0, 0, 255)",
+      "look": null
+    },
+    {
+      "name": "unparsable ground gives no look",
+      "background": "white",
+      "ink": "rgb(0, 0, 0)",
+      "link": "rgb(0, 0, 255)",
+      "look": null
+    },
+    {
+      "name": "space-separated rgb with slash alpha",
+      "background": "rgb(20 22 30)",
+      "ink": "rgb(230 230 230 / 90%)",
+      "link": "rgb(120 200 120)",
+      "look": {
+        "mode": "dark",
+        "base": [
+          20,
+          22,
+          30
+        ],
+        "tokens": {
+          "--bg-primary": "20 22 30",
+          "--bg-sidebar": "20 22 30",
+          "--bg-surface": "27 29 36",
+          "--bg-elevated": "29 31 39",
+          "--bg-input": "27 29 36",
+          "--ink": "209 209 210",
+          "--secondary": "149 149 152",
+          "--muted": "103 104 109",
+          "--faint": "75 76 82",
+          "--line": "rgb(209 209 210/.14)",
+          "--line-soft": "rgb(209 209 210/.07)",
+          "--selected": "rgb(209 209 210/.08)",
+          "--accent": "120 200 120",
+          "--accent-hover": "142 202 142",
+          "--button-bg": "50 52 59",
+          "--button-hover": "65 67 73",
+          "--button-ink": "209 209 210"
+        }
+      }
+    }
+  ]
+}

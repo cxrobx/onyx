@@ -53,6 +53,29 @@ def markdown_css_for(storage, roots: dict[str, Path]) -> str | None:
     return markdown_theme_css(storage, roots.get("Notes"))
 
 
+def look_for(storage, roots: dict[str, Path]) -> dict:
+    """What the Mac app wears, for the phone's chrome: the index's ``look`` (wire format, "Look").
+
+    ``vault`` is the palette ``app.current_vault_look`` wears, under the same switch ("Match vault appearance" is
+    either follow setting), so the phone shows the vault exactly when the Mac does.
+    """
+    from .. import vault_look
+
+    settings = storage.settings()
+    notes = roots.get("Notes")
+    enabled = bool(settings.get("markdown_follow_obsidian", True) or settings.get("sidebar_follow_obsidian", True))
+    vault = (
+        vault_look.palette(storage.markdown_theme(notes), storage.sidebar_theme(notes))
+        if enabled and notes is not None else None
+    )
+    appearance = settings.get("appearance_theme")
+    return {
+        "vault": vault,
+        "follow_page": bool(settings.get("html_follow_page", True)),
+        "appearance": appearance if appearance in ("system", "light", "dark") else "system",
+    }
+
+
 class Publisher:
     def __init__(self, storage, roots: Callable[[], dict[str, Path]], *,
                  secrets: keychain.Secrets | None = None) -> None:
@@ -90,6 +113,7 @@ class Publisher:
             report = publish(
                 config=config, secrets=self._secrets, store=R2Store.from_secrets(self._secrets),
                 roots=roots, markdown_css=markdown_css_for(self._storage, roots), data_dir=self._storage.data_dir,
+                look=look_for(self._storage, roots),
             )
         except Exception as exc:  # the thread must outlive one bad cycle
             message = describe_error(exc)
