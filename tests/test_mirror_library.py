@@ -129,6 +129,15 @@ class LibraryTests(unittest.TestCase):
         self.assertIn(f'href="{self.shown_id}"', thread, "a thread links back to the page it was asked on")
         self.assertLess(thread.index("What does this mean?"), thread.index("And then?"))
 
+    def test_mirror_leaves_off_a_thread_removed_from_recents(self) -> None:
+        # Storage.hide_recent_conversation marks the thread's turns; the phone follows the Mac's Recent asks.
+        hidden = {**conversation("f1", str(self.shown), started=3.0, parent="r1"), "recent_hidden": 1}
+        history = FakeHistory([], [hidden, {**conversation("r1", str(self.shown), started=1.0), "recent_hidden": 1},
+                                   conversation("g1", str(self.link), started=2.0)])
+        shelf = self.library(history)
+        self.assertEqual([c["doc"] for c in shelf.library["chats"]], [self.guide_id])
+        self.assertEqual({p.page["path"] for p in shelf.pages}, {"Chats/g1"})
+
     def test_mirror_answers_cannot_run_script(self) -> None:
         answer = ("<script>alert(1)</script> <img src=x onerror=alert(2)> [bad](javascript:alert(3)) "
                   "[web](https://example.com/a) **bold**")

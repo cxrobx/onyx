@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 
 # Extra browser origins allowed to reach /ask and the JSON APIs, beyond the
 # built-in localhost set. The Obsidian plugin's renderer origin is the default.
@@ -221,6 +221,15 @@ class Storage:
             )
         if "parent_request_id" not in columns:
             self._db.execute("ALTER TABLE conversations ADD COLUMN parent_request_id TEXT")
+        # Remove from Recents hides a row from the recent lists; it never deletes it. A document keeps its reading
+        # position and an ask stays in History, and opening the page again (or asking on in the thread) brings it back.
+        if "recent_hidden" not in columns:
+            self._db.execute("ALTER TABLE conversations ADD COLUMN recent_hidden INTEGER NOT NULL DEFAULT 0")
+        document_columns = {
+            str(row[1]) for row in self._db.execute("PRAGMA table_info(documents)").fetchall()
+        }
+        if "recent_hidden" not in document_columns:
+            self._db.execute("ALTER TABLE documents ADD COLUMN recent_hidden INTEGER NOT NULL DEFAULT 0")
         self._db.execute(
             "INSERT INTO app_meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -453,7 +462,8 @@ class Storage:
                     kind=excluded.kind,
                     folder=COALESCE(excluded.folder, documents.folder),
                     page_count=COALESCE(excluded.page_count, documents.page_count),
-                    last_opened_at=excluded.last_opened_at
+                    last_opened_at=excluded.last_opened_at,
+                    recent_hidden=0
                 """,
                 (source, title or Path(source).name or source, kind, folder, page_count, now, now),
             )
@@ -478,12 +488,40 @@ class Storage:
                     (SELECT COUNT(*) FROM conversations c
                      WHERE c.document_source=d.source AND c.status='complete') AS conversation_count
                 FROM documents d
-                WHERE d.kind != 'selection'
+                WHERE d.kind != 'selection' AND d.recent_hidden = 0
                 ORDER BY d.last_opened_at DESC LIMIT ?
                 """,
                 (max(1, min(limit, 100)),),
             ).fetchall()
         return [dict(row) for row in rows]
+
+    def hide_recent_document(self, source: str) -> bool:
+        with self._lock:
+            cursor = self._db.execute("UPDATE documents SET recent_hidden=1 WHERE source=?", (source,))
+            self._db.commit()
+        return bool(cursor.rowcount)
+
+    def hide_recent_conversation(self, request_id: str) -> bool:
+        """Hide a thread from Recent asks: its latest turn and every turn it followed.
+
+        A thread is hidden while its latest turn is. Marking the turns before it too means the phone, which lists a
+        thread by its latest *completed* turn, agrees with the home page, which lists it by its latest turn of any
+        status. Asking on in the thread adds a turn that isn't hidden, so the thread comes back."""
+        with self._lock:
+            cursor = self._db.execute(
+                """
+                WITH RECURSIVE chain(id) AS (
+                    SELECT request_id FROM conversations WHERE request_id=?
+                    UNION
+                    SELECT c.parent_request_id FROM conversations c JOIN chain ON c.request_id=chain.id
+                    WHERE c.parent_request_id IS NOT NULL
+                )
+                UPDATE conversations SET recent_hidden=1 WHERE request_id IN (SELECT id FROM chain)
+                """,
+                (request_id,),
+            )
+            self._db.commit()
+        return bool(cursor.rowcount)
 
     def document(self, source: str) -> dict[str, Any] | None:
         with self._lock:

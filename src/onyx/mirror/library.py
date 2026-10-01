@@ -196,6 +196,8 @@ def build_library(storage: Any, *, built: Any, ids: Callable[[str], str], look: 
     threads: list[dict[str, Any]] = []
     if chats:
         for turns in _threads(storage.recent_conversations(limit=200)):
+            if turns[-1].get("recent_hidden"):
+                continue  # removed from Recents on the Mac (asking on in the thread brings it back)
             first = turns[0]
             doc = _page_for(first.get("document_source"), by_real)
             if doc is None:

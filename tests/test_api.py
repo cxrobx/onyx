@@ -756,6 +756,43 @@ class HtmlVaultApiTests(unittest.TestCase):
         }])
         self.assertEqual(self.client.get("/api/dock/recent", headers={"Origin": "https://evil.example"}).status_code, 403)
 
+    def test_remove_from_recents_hides_and_never_deletes(self) -> None:
+        storage = self.app.state.storage
+        page = str(self.guide / "index.html")
+        doc_id = storage.upsert_document(source=page, title="Who holds the plan", kind="html", folder=str(self.base))
+        storage.update_position(page, 420)
+        for rid, parent in (("req-1", None), ("req-2", "req-1")):
+            storage.start_conversation(
+                request_id=rid, document_id=doc_id, document_source=page, document_title="Who holds the plan",
+                document_page=None, selection="Before you read.", context="", action="ask", question=rid,
+                folder=str(self.base), provider="claude", model="sonnet", parent_request_id=parent,
+            )
+            storage.finish_conversation(rid, status="complete", answer="Yes.")
+
+        self.assertEqual(self.post("/api/recent/remove", {"source": page}, token=False).status_code, 403)
+        self.assertEqual(self.post("/api/recent/remove", {}).status_code, 400)
+        self.assertEqual(self.post("/api/recent/remove", {"source": "/nowhere.md"}).status_code, 404)
+
+        self.assertEqual(self.post("/api/recent/remove", {"source": page}).status_code, 200)
+        self.assertEqual(self.client.get("/api/library").json()["documents"], [])
+        self.assertEqual(self.client.get("/api/dock/recent").json()["artifacts"], [])
+        self.assertEqual(storage.document(page)["scroll_y"], 420)  # hidden, not deleted: the place is kept
+        storage.upsert_document(source=page, title="Who holds the plan", kind="html", folder=str(self.base))
+        self.assertEqual([d["source"] for d in self.client.get("/api/library").json()["documents"]], [page])
+
+        # A thread goes by its latest turn, and every turn it followed goes with it; History still has them all.
+        self.assertEqual(self.post("/api/recent/remove", {"request_id": "req-2"}).status_code, 200)
+        asks = {c["request_id"]: c["recent_hidden"] for c in self.client.get("/api/library").json()["conversations"]}
+        self.assertEqual(asks, {"req-1": 1, "req-2": 1})
+        storage.start_conversation(
+            request_id="req-3", document_id=doc_id, document_source=page, document_title="Who holds the plan",
+            document_page=None, selection="Before you read.", context="", action="ask", question="again",
+            folder=str(self.base), provider="claude", model="sonnet", parent_request_id="req-2",
+        )
+        storage.finish_conversation("req-3", status="complete", answer="Still yes.")
+        latest = self.client.get("/api/library").json()["conversations"][0]
+        self.assertEqual((latest["request_id"], latest["recent_hidden"]), ("req-3", 0))  # asking on brings it back
+
     def test_tree_search_and_shell_use_titles_and_the_html_kind(self) -> None:
         tree = self.client.get("/api/vault/tree", params={"vault": "html"}).json()
         self.assertTrue(tree["ok"])

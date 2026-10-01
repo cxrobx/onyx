@@ -2601,6 +2601,57 @@ class BrowserSmokeTests(unittest.TestCase):
                     browser.close()
         self.assertEqual(page_errors, [])
 
+    def test_home_cards_are_removed_from_recents_by_their_menu(self) -> None:
+        # Right-click a card or an ask on Library's home: Remove from Recents takes it off the list at once, and History
+        # (See all) still has the ask. Both engines: the app is WebKit.
+        notes = self.root / "vault"
+        notes.mkdir()
+        storage: Storage = self.app.state.storage
+        storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
+        storage.add_root(notes)
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    sources = []
+                    for name in ("Alpha", "Beta"):
+                        note = notes / f"{name}.md"
+                        note.write_text(f"# {name}\n\nA note.\n", encoding="utf-8")
+                        sources.append(str(note.resolve()))
+                        doc_id = storage.upsert_document(source=sources[-1], title=name, kind="markdown", folder=str(notes))
+                    rid = f"req-{engine}"
+                    storage.start_conversation(
+                        request_id=rid, document_id=doc_id, document_source=sources[-1], document_title="Beta",
+                        document_page=None, selection="A note.", context="", action="ask", question="What is Beta?",
+                        folder=str(notes), provider="claude", model="sonnet",
+                    )
+                    storage.finish_conversation(rid, status="complete", answer="A note.")
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(self.base_url, wait_until="networkidle")
+                    cards = page.locator("#home-docs .home-card")
+                    expect(cards.locator(".t")).to_have_text(["Beta", "Alpha"])
+
+                    cards.first.click(button="right")
+                    menu = page.locator(".onyx-menu")
+                    expect(menu.locator("button")).to_have_text(["Open", "Open in New Tab", "Remove from Recents"])
+                    expect(cards.first).to_have_class(re.compile(r"\bmenu-for\b"))
+                    menu.locator("button", has_text="Remove from Recents").click()
+                    expect(cards.locator(".t")).to_have_text(["Alpha"])
+                    self.assertEqual([d["source"] for d in storage.recent_documents()], [sources[0]])
+
+                    asks = page.locator("#home-asks .home-ask")
+                    expect(asks).to_contain_text(["What is Beta?"])
+                    asks.first.click(button="right")
+                    expect(menu.locator("button")).to_have_text(["Open Conversation", "Remove from Recents"])
+                    menu.locator("button", has_text="Remove from Recents").click()
+                    expect(page.locator("#home-asks .home-empty")).to_be_visible()
+                    page.locator("#home-all").click()
+                    expect(page.locator("#history-results")).to_contain_text("What is Beta?")
+                    browser.close()
+        self.assertEqual(page_errors, [])
+
     def test_library_is_home_and_settings_and_history_are_dialogs(self) -> None:
         # The app opens on Library: both vaults' trees under their headings, and a home page of what was read and asked.
         # Settings and Recent conversations are dialogs at the sidebar's foot; a setting applies as it changes, and a saved

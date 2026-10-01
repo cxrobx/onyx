@@ -980,6 +980,30 @@ def create_app(config: AppConfig) -> FastAPI:
         await asyncio.to_thread(_tag_vaults, data["conversations"], "document_source")
         return JSONResponse({"ok": True, **data}, headers=cors(request.headers.get("origin")))
 
+    @app.post("/api/recent/remove")
+    async def recent_remove(request: Request):
+        """Remove from Recents: a page from Recently opened (by `source`) or a thread from Recent asks (by its latest
+        `request_id`). Hidden, never deleted (Storage.hide_recent_document)."""
+        if denied := api_forbidden(request):
+            return denied
+        try:
+            body = await request.json()
+        except (ValueError, UnicodeDecodeError):
+            body = None
+        if not isinstance(body, dict) or body.get("token") != config.token:
+            return JSONResponse({"ok": False, "error": "invalid token"}, status_code=403)
+        storage: Storage = app.state.storage
+        source, request_id = body.get("source"), body.get("request_id")
+        if isinstance(source, str) and 0 < len(source) <= 4000:
+            found = await asyncio.to_thread(storage.hide_recent_document, source)
+        elif isinstance(request_id, str) and 0 < len(request_id) <= 200:
+            found = await asyncio.to_thread(storage.hide_recent_conversation, request_id)
+        else:
+            return JSONResponse({"ok": False, "error": "name a source or a request_id"}, status_code=400)
+        if not found:
+            return JSONResponse({"ok": False, "error": "not in recents"}, status_code=404)
+        return JSONResponse({"ok": True}, headers=cors(request.headers.get("origin")))
+
     @app.get("/api/dock/recent")
     async def dock_recent(request: Request):
         if denied := api_forbidden(request):

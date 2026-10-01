@@ -278,7 +278,7 @@ body.side-unpinned #side-grip::after{{top:10px;bottom:10px;right:2px}}
 body.side-resizing,body.side-resizing *{{cursor:col-resize!important;user-select:none;-webkit-user-select:none}} body.side-resizing .shell,body.side-resizing #vault-side{{transition:none!important}} body.side-resizing #reader{{pointer-events:none}}
 @media(max-width:800px){{#side-grip{{display:none}}}}
 /* The row a menu is open for wears a ring, as Finder's does. */
-#tree .menu-for{{box-shadow:inset 0 0 0 2px rgb(var(--accent))}}
+#tree .menu-for,#home .menu-for{{box-shadow:inset 0 0 0 2px rgb(var(--accent))}}
 /* Reorganising Artifacts: the row being dragged fades, the folder it would land in wears that ring over a wash (the whole
    list does, for the top level), a pinned row carries a quiet pin, and a name being edited is a field in its row. */
 #tree .dragging{{opacity:.45}} #tree .drop-into{{background:rgb(var(--accent)/.12);box-shadow:inset 0 0 0 2px rgb(var(--accent))}} #tree.drop-root{{border-radius:10px;box-shadow:inset 0 0 0 2px rgb(var(--accent)/.55)}}
@@ -851,16 +851,25 @@ for(const ev of ['focusout','scroll','click','contextmenu'])tree.addEventListene
 // your latest asks. Fetched fresh each time it shows; a card is a plain link into the reader, an ask opens its conversation.
 function docTag(d){{return d.vault==='notes'?'Note':d.vault==='html'?'Artifact':({{pdf:'PDF',markdown:'Markdown',text:'Text',html:'HTML','remote-html':'Web'}})[d.kind]||'File'}}
 function docWhere(d){{if(d.vault)return [GROUPS[d.vault]].concat(d.vault_folder?d.vault_folder.split('/'):[]).join(' › ');if(/^https?:/i.test(d.source))try{{return new URL(d.source).host}}catch(e){{}}return shortPath(d.source.replace(/\\/[^/]*$/,''))}}
-function docCard(d){{return `<a class=home-card target=reader href="${{esc(itemHref(d,''))}}" title="${{esc(d.vault_path||d.source)}}"><span class=t>${{esc(d.title)}}</span><span class=m><span class="tag ${{esc(d.vault||'')}}">${{esc(docTag(d))}}</span><span class=w>${{esc(docWhere(d))}}</span><span class=a>${{esc(ago(d.last_opened_at))}}</span></span></a>`}}
+function docCard(d){{return `<a class=home-card target=reader href="${{esc(itemHref(d,''))}}" data-source="${{esc(d.source)}}" title="${{esc(d.vault_path||d.source)}}"><span class=t>${{esc(d.title)}}</span><span class=m><span class="tag ${{esc(d.vault||'')}}">${{esc(docTag(d))}}</span><span class=w>${{esc(docWhere(d))}}</span><span class=a>${{esc(ago(d.last_opened_at))}}</span></span></a>`}}
 // A follow-up is saved as an ask of its own naming the one it followed (so is Ask again): list each conversation once, by
 // its latest turn, the one Continue picks up from, with how many asks it holds.
 function threads(items){{const byId=new Map(items.map(c=>[c.request_id,c])),followed=new Set(items.map(c=>c.parent_request_id));
 return items.filter(c=>!followed.has(c.request_id)).map(c=>{{let n=1;for(let p=byId.get(c.parent_request_id);p&&n<items.length;p=byId.get(p.parent_request_id))n++;return {{...c,turns:n}}}})}}
 function askRow(c){{return `<button type=button class=home-ask data-id="${{esc(c.request_id)}}"><span class=t><strong>${{esc(c.document_title||'Untitled')}}</strong><span class=a>${{c.turns>1?c.turns+' asks · ':''}}${{esc(ago(c.started_at))}}</span></span><span class=q>${{esc(c.question||({{ask:'Question',eli5:'ELI5',prove:'Prove it'}})[c.action]||c.action)}}</span></button>`}}
-async function loadHome(){{try{{const d=await api('/api/library'),docs=(d.documents||[]).slice(0,9),asks=threads(d.conversations||[]).slice(0,6);PANELS.remember(d.conversations);
+async function loadHome(){{try{{const d=await api('/api/library'),docs=(d.documents||[]).slice(0,9),asks=threads(d.conversations||[]).filter(c=>!c.recent_hidden).slice(0,6);PANELS.remember(d.conversations);
 $('#home-docs').innerHTML=docs.length?docs.map(docCard).join(''):'<div class=home-empty>Documents you open will appear here.</div>';
 $('#home-asks').innerHTML=asks.length?asks.map(askRow).join(''):'<div class=home-empty>Your completed answers will be saved here.</div>'}}catch(e){{$('#home-docs').innerHTML=`<div class=home-empty>${{esc(e.message)}}</div>`}}}}
 $('#home-asks').addEventListener('click',e=>{{const b=e.target.closest('[data-id]');if(b)PANELS.showConversation(b.dataset.id)}}); $('#home-all').onclick=()=>PANELS.openHistory();
+// A card's menu, as the sidebar's rows have one. Remove from Recents hides the page or the thread from these lists (and the
+// palette's, the Dock's and the phone's); it deletes nothing, and opening the page again or asking on brings it back.
+home.addEventListener('contextmenu',e=>{{const card=e.target.closest('#home-docs .home-card, #home-asks .home-ask');if(!card||!window.OnyxMenu)return;e.preventDefault();
+const sel=getSelection();if(sel&&sel.anchorNode&&card.contains(sel.anchorNode))sel.removeAllRanges();
+let x=e.clientX,y=e.clientY;if(!x&&!y){{const r=card.getBoundingClientRect();x=r.left+16;y=r.bottom}}const ask=card.classList.contains('home-ask');
+const items=ask?[{{id:'open',label:'Open Conversation'}}]:[{{id:'open',label:'Open'}},{{id:'open-tab',label:'Open in New Tab'}}];items.push({{separator:true}},{{id:'remove',label:'Remove from Recents'}});
+OnyxMenu.open({{items,x,y,label:(ask?'Ask':'Page')+' actions',returnFocus:card,onClose:()=>card.classList.remove('menu-for'),onSelect:id=>homeAction(id,card,ask)}});card.classList.add('menu-for')}});
+async function homeAction(id,card,ask){{try{{if(id==='open')card.click();else if(id==='open-tab')openTab(card.getAttribute('href'));
+else if(id==='remove'){{await postJSON('/api/recent/remove',ask?{{request_id:card.dataset.id}}:{{source:card.dataset.source}});card.remove();await loadHome()}}}}catch(err){{OnyxMenu.toast(err.message||String(err),'bad')}}}}
 $('#open-form').onsubmit=e=>{{e.preventDefault();let s=$('#open-src').value.trim(),hash='';if(!s)return;const m=s.match(new RegExp('^((?:file://|/|~).*[.](?:html?|md|markdown|txt|pdf))(#[^/]*)$','i'));if(m){{s=m[1];hash=m[2]}}const vk=vaultOf(s),f=$('#open-folder').value.trim();navigate((vk?viewHref(s,vk):'/view?src='+encodeURIComponent(s)+(f?'&folder='+encodeURIComponent(f):''))+hash);$('#open-src').value=''}};
 $('#open-folder').oninput=e=>{{$('#open-folder-label').textContent=shortPath(e.target.value.trim())||'the default folder'}};
 home.querySelectorAll('[data-pick]').forEach(b=>b.onclick=async()=>{{const el=$('#'+b.dataset.target);try{{const p=await window.webkit.messageHandlers.askwPick.postMessage({{kind:b.dataset.pick,initial:el.value}});if(p){{el.value=p;el.dispatchEvent(new Event('input'))}}}}catch(e){{OnyxMenu.toast(e.message,'bad')}}}});
