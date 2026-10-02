@@ -93,7 +93,13 @@ HKDF-SHA256, salt `b"onyx-mirror/v1"`, 32 bytes each:
 hex characters. Names:
 - `index` for the index;
 - `page:` + the page's mirror path, which is `Notes/<path in the vault>` or
-  `Artifacts/<path of its entry in Artifacts>` (POSIX separators);
+  `Artifacts/<path of its entry in Artifacts>` (POSIX separators), or, for another
+  notes vault (Settings ▸ Vaults ▸ Other vaults, added 2026-10-02),
+  `<its folder's name>/<path in that vault>`: `Dark Label/Patterns/Offers.md`. A
+  name already taken takes a number (`Notes 2`). It is still v1: ids derive the
+  same way, and a phone lists any top-level name it doesn't know as a folder;
+  the app orders the roots as the Mac's Library does, Notes, the other vaults,
+  then Artifacts;
 - `asset:` + the asset file's realpath.
 
 **Blobs.** `blob = nonce(12 random bytes) ‖ AES-256-GCM(K_enc, nonce, plaintext,
@@ -223,6 +229,8 @@ it and keeps it in its Keychain.
 enabled = true
 interval_minutes = 5
 include = ["Notes/Areas", "Artifacts"]   # mirror paths; "Notes" is the whole vault
+# Another notes vault is reached by its folder's name, and stays home until named:
+# include = ["Notes", "Dark Label/Patterns", "Artifacts"]
 exclude = []
 ```
 
@@ -240,8 +248,9 @@ Keychain service `onyx-mirror`, one item per account: `master_key`,
 
 **Publisher.** For each included page:
 - Markdown goes through `viewer.load_local_document(path, display_path=…,
-  vault=index)` with the vault's Markdown theme CSS added, as `/view` does, so
-  the page matches the app. Its `RenderContext.view_url` is overridden to point
+  vault=index)` with its vault's Markdown theme CSS added (another vault's own
+  once Obsidian has measured it, else the primary's), as `/view` does, so the
+  page matches the app. Its `RenderContext.view_url` is overridden to point
   links at mirror ids instead of `/view?src=…`, which covers wikilinks and
   relative links, since both go through it.
 - Artifacts HTML is published as the author wrote it (scripts kept, as trusted

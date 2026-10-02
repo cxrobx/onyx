@@ -26,7 +26,7 @@ import unicodedata
 import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, Callable, Mapping
 
 from .. import markdown_theme, vault, viewer
 
@@ -93,7 +93,7 @@ def _under(parts: tuple[str, ...], entry: tuple[str, ...]) -> bool:
 
 @dataclass
 class _Candidate:
-    mirror: str  # "Notes/<rel>" or "Artifacts/<entry_rel>"
+    mirror: str  # "Notes/<rel>", "<another vault's name>/<rel>" or "Artifacts/<entry_rel>"
     item: vault.VaultFile
     index: vault.VaultIndex
     artifact: bool
@@ -368,14 +368,18 @@ def build_mirror(
     include: list[str],
     exclude: list[str],
     ids: Callable[[str], str],
-    markdown_css: str | None = None,
+    markdown_css: str | Mapping[str, str | None] | None = None,
     home: Path | None = None,
 ) -> list[BuiltObject]:
     """Every page the mirror publishes and every asset those pages reference, as plaintext objects.
 
-    ``roots`` maps ``"Notes"`` and ``"Artifacts"`` to their folders, either of which may be absent; a page's mirror path
-    is ``Notes/<path in the notes index>`` or ``Artifacts/<its entry in Artifacts>``. ``include`` names what to publish
-    and there is no default: an empty list publishes nothing, and a root no entry reaches is not even walked.
+    ``roots`` maps ``"Notes"`` and ``"Artifacts"`` to their folders, either of which may be absent, and any other name to
+    another notes vault (``service.roots_from_settings``); a page's mirror path is ``<root name>/<path in its notes
+    index>`` or ``Artifacts/<its entry in Artifacts>``. ``include`` names what to publish and there is no default: an
+    empty list publishes nothing, and a root no entry reaches is not even walked.
+
+    ``markdown_css`` is one stylesheet for every vault's notes, or one per root name (a vault missing from it gets
+    none).
 
     An asset is uploaded only from inside ``home`` (default: the user's home folder), compared by path components after
     every link is followed; one outside it is left as ``#onyx-missing``, as a file that isn't there is. Pages are not held
@@ -388,8 +392,8 @@ def build_mirror(
     built = MirrorBuild()
     includes, excludes = _entries(include), _entries(exclude)
     candidates: list[_Candidate] = []
-    for root_name, kind in ((NOTES, "notes"), (ARTIFACTS, "html")):
-        root = roots.get(root_name)
+    for root_name, root in roots.items():
+        kind = "html" if root_name == ARTIFACTS else "notes"
         if root is None or not any(entry[0] == _key(root_name) for entry in includes):
             continue
         index = vault.VaultIndex.build(Path(root), kind)
@@ -426,7 +430,8 @@ def build_mirror(
     used: dict[str, BuiltObject] = {}
     for page in pages:
         try:
-            obj, referenced = _build_page(page, where, assets, markdown_css)
+            css = markdown_css.get(page.cand.mirror.split("/", 1)[0]) if isinstance(markdown_css, Mapping) else markdown_css
+            obj, referenced = _build_page(page, where, assets, css)
         except Exception:  # noqa: BLE001 - one unreadable or unrenderable file must not stop the rest
             # Its assets are not collected: a page that isn't published uploads nothing.
             built.skipped.append(page.cand.mirror)

@@ -510,5 +510,78 @@ class MirrorBuildTests(unittest.TestCase):
         self.assertEqual(self.build().skipped, [])
 
 
+class OtherVaultsMirrorTests(unittest.TestCase):
+    """Another notes vault beside the primary (Settings ▸ Vaults ▸ Other vaults) reaches the phone as one more root, named
+    by its folder, through the same gates: nothing of it leaves the Mac until ``include`` names it."""
+
+    def setUp(self) -> None:
+        self.temp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temp.cleanup)
+        self.base = Path(self.temp.name)
+        self.notes, self.label = self.base / "CX", self.base / "Dark Label"
+        write(self.notes / "Pricing.md", "# Pricing\n\nCX-RATE-CARD\n")
+        write(self.label / "Pricing.md", "# Pricing\n\nPer beat.\n")
+        write(self.label / "Patterns" / "Offers.md", "# Offers\n\nSee [[Pricing]].\n")
+        write(self.label / "Transcripts" / "Call.md", "# Call\n\nCANARY-TRANSCRIPT\n")
+        self.roots = {"Notes": self.notes, "Dark Label": self.label}
+
+    def build(self, include, exclude=(), **kwargs):
+        return build_mirror(roots=self.roots, include=list(include), exclude=list(exclude), ids=fake_ids,
+                            home=self.base, **kwargs)
+
+    @staticmethod
+    def pages(built) -> dict:
+        return {obj.page["path"]: obj for obj in built if obj.page is not None}
+
+    def test_another_vault_publishes_only_what_include_names(self) -> None:
+        self.assertEqual(set(self.pages(self.build(["Notes"]))), {"Notes/Pricing.md"})
+        with mock.patch.object(build.vault.VaultIndex, "build", wraps=build.vault.VaultIndex.build) as walked:
+            self.build(["Notes"])
+        self.assertEqual([str(call.args[0]) for call in walked.call_args_list], [str(self.notes)])  # never walked
+        built = self.build(["Notes", "dark label"], exclude=["Dark Label/Transcripts"])  # names fold, as for Notes
+        self.assertEqual(set(self.pages(built)), {"Notes/Pricing.md", "Dark Label/Pricing.md", "Dark Label/Patterns/Offers.md"})
+        self.assertNotIn(b"CANARY-TRANSCRIPT", b"".join(obj.data for obj in built))
+
+    def test_a_wikilink_lands_in_its_own_vault(self) -> None:
+        built = self.build(["Notes", "Dark Label"])
+        offers = self.pages(built)["Dark Label/Patterns/Offers.md"].data.decode("utf-8")
+        self.assertIn(fake_ids("page:Dark Label/Pricing.md"), offers)
+        self.assertNotIn(fake_ids("page:Notes/Pricing.md"), offers)
+
+    def test_each_vault_wears_its_own_reading_styles(self) -> None:
+        css = {"Notes": "body{color:rgb(1,1,1)}", "Dark Label": "body{color:rgb(2,2,2)}"}
+        pages = self.pages(self.build(["Notes", "Dark Label"], markdown_css=css))
+        self.assertIn("rgb(1,1,1)", pages["Notes/Pricing.md"].data.decode())
+        self.assertIn("rgb(2,2,2)", pages["Dark Label/Pricing.md"].data.decode())
+        self.assertNotIn("rgb(1,1,1)", pages["Dark Label/Pricing.md"].data.decode())
+        # One stylesheet, as before there were others, still dresses every note.
+        single = self.pages(self.build(["Notes", "Dark Label"], markdown_css="body{color:rgb(3,3,3)}"))
+        self.assertTrue(all("rgb(3,3,3)" in obj.data.decode() for obj in single.values()))
+
+    def test_roots_and_styles_from_the_apps_settings(self) -> None:
+        from onyx.mirror import service
+
+        art, twin = self.base / "Artifacts", self.base / "elsewhere" / "Notes"
+        art.mkdir()
+        twin.mkdir(parents=True)
+        settings = {"vault_root": str(self.notes), "html_vault_root": str(art),
+                    "extra_vault_roots": [str(self.label), str(twin), str(self.base / "gone")]}
+        roots = service.roots_from_settings(settings)
+        self.assertEqual(list(roots.items()),
+                         [("Notes", self.notes), ("Dark Label", self.label), ("Notes 2", twin), ("Artifacts", art)])
+        self.assertEqual(list(service.roots_from_settings({**settings, "extra_vault_roots": "nope"})), ["Notes", "Artifacts"])
+        storage = Storage(self.base / "data")
+        self.addCleanup(storage.close)
+        primary = {"mode": "light", "styles": {"content": {"color": "rgb(0, 43, 54)"}}}
+        storage.save_markdown_theme(self.notes, primary)
+        # Without other vaults it is the one stylesheet it always was.
+        self.assertEqual(service.markdown_css_for(storage, {"Notes": self.notes, "Artifacts": art}),
+                         markdown_theme_css(storage, self.notes))
+        css = service.markdown_css_for(storage, roots)
+        self.assertEqual(css["Dark Label"], css["Notes"])  # never measured: the primary's, as the app falls back
+        storage.save_markdown_theme(self.label, {"mode": "dark", "styles": {"content": {"color": "rgb(9, 9, 9)"}}})
+        self.assertIn("rgb(9, 9, 9)", service.markdown_css_for(storage, roots)["Dark Label"])
+
+
 if __name__ == "__main__":
     unittest.main()

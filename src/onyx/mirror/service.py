@@ -27,30 +27,58 @@ THREAD_NAME = "onyx-mirror-publisher"
 
 
 def roots_from_settings(settings: dict) -> dict[str, Path]:
-    """The two trees as the app's settings name them (the same meaning as ``app._vault_root``), missing ones left out."""
+    """The trees as the app's settings name them (the same meaning as ``app._all_vaults``), missing ones left out:
+    "Notes", each other notes vault under its folder's name, then "Artifacts".
+
+    The name is where a page's mirror path starts, so ``include`` reaches another vault as ``"Dark Label"`` or
+    ``"Dark Label/Patterns"``, and nothing of it is published until an entry does. A folder named like one already
+    taken (a vault called Notes, two vaults of one name) takes a number: ``"Notes 2"``.
+    """
     from .. import vault
 
-    roots: dict[str, Path] = {}
-    for label, key in (("Notes", "vault_root"), ("Artifacts", "html_vault_root")):
-        raw = str(settings.get(key) or "").strip()
-        if not raw:
-            continue
-        root = vault.normalize(Path(raw).expanduser())
+    def folder(raw) -> Path | None:
+        text = str(raw or "").strip()
+        if not text:
+            return None
+        root = vault.normalize(Path(text).expanduser())
         try:
-            if root.is_absolute() and root.is_dir():
-                roots[label] = root
+            return root if root.is_absolute() and root.is_dir() else None
         except OSError:
+            return None
+
+    roots: dict[str, Path] = {}
+    if (notes := folder(settings.get("vault_root"))) is not None:
+        roots["Notes"] = notes
+    taken = {"notes", "artifacts"}
+    extra = settings.get("extra_vault_roots")
+    for raw in extra if isinstance(extra, list) else []:
+        root = folder(raw)
+        if root is None:
             continue
+        label, n = root.name, 2
+        while label.casefold() in taken:
+            label, n = f"{root.name} {n}", n + 1
+        taken.add(label.casefold())
+        roots[label] = root
+    if (artifacts := folder(settings.get("html_vault_root"))) is not None:
+        roots["Artifacts"] = artifacts
     return roots
 
 
-def markdown_css_for(storage, roots: dict[str, Path]) -> str | None:
-    """The vault's Markdown theme as CSS, so a mirrored note looks like the app's. None if the builder lacks it."""
+def markdown_css_for(storage, roots: dict[str, Path]) -> str | dict[str, str | None] | None:
+    """The vault's Markdown theme as CSS, so a mirrored note looks like the app's. None if the builder lacks it.
+
+    With other notes vaults, one stylesheet per root instead: each vault's own once Obsidian has measured it, else the
+    primary's, as the app's reader falls back (``app.current_markdown_theme``)."""
     try:
         from .build import markdown_theme_css
     except ImportError:
         return None
-    return markdown_theme_css(storage, roots.get("Notes"))
+    primary = markdown_theme_css(storage, roots.get("Notes"))
+    others = [label for label in roots if label not in ("Notes", "Artifacts")]
+    if not others:
+        return primary
+    return {"Notes": primary, **{label: markdown_theme_css(storage, roots[label]) or primary for label in others}}
 
 
 def library_for(storage, config, look: dict | None) -> Callable:
