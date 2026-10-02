@@ -7,6 +7,19 @@
 // whichever stylesheet came last.
 const MONO = "ui-monospace,SFMono-Regular,Menlo,monospace";
 
+// A callout's colour by its type, from the reader's own `--callout-*` variables (viewer.py, `_CALLOUT_COLOURS`).
+const CALLOUT_TYPES: Record<string, string[]> = {
+  cyan: ["abstract", "summary", "tldr", "tip", "hint", "important"],
+  green: ["success", "check", "done"],
+  orange: ["question", "help", "faq", "warning", "caution", "attention"],
+  red: ["failure", "fail", "missing", "danger", "error", "bug"],
+  purple: ["example"],
+  gray: ["quote", "cite"],
+};
+const CALLOUT_COLOURS = Object.entries(CALLOUT_TYPES).map(([colour, types]) =>
+  `body .askw-ed .cm-line.askw-ed-callout:is(${types.map((t) => `[data-callout="${t}"]`).join(",")}){--callout-color:var(--callout-${colour})}`,
+).join("\n");
+
 export const CSS = `
 body.askw-editing main > :not(.askw-ed-host){display:none!important}
 body .askw-ed .cm-editor{background:transparent;color:inherit}
@@ -29,6 +42,13 @@ body .askw-ed .askw-ed-link{color:rgb(var(--reader-accent));text-decoration:unde
 body .askw-ed [data-askw-href],body .askw-ed [data-askw-wiki]{cursor:pointer}
 body .askw-ed .askw-ed-embed{color:rgb(var(--reader-muted))}
 body .askw-ed .cm-line.askw-ed-quote{padding-left:20px;border-left:3px solid rgb(var(--reader-line)/.16);color:rgb(var(--reader-muted))}
+body .askw-ed .cm-line.askw-ed-callout{--callout-color:var(--callout-blue,8 109 221);padding:0 12px 0 24px;background:rgb(var(--callout-color)/.1)}
+body .askw-ed .cm-line.askw-ed-callout-title{padding-top:12px;border-radius:4px 4px 0 0;color:rgb(var(--callout-color));font-weight:600}
+body .askw-ed .cm-line.askw-ed-callout-last{padding-bottom:12px;border-radius:0 0 4px 4px}
+body .askw-ed .cm-line.askw-ed-callout-title.askw-ed-callout-last{border-radius:4px}
+${CALLOUT_COLOURS}
+body .askw-ed .askw-ed-tag{padding:1px 6px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}
+body .askw-ed .askw-ed-comment{color:rgb(var(--reader-faint))}
 body .askw-ed .askw-ed-bullet{display:inline-block;min-width:.6em;text-align:center;color:rgb(var(--reader-muted))}
 body .askw-ed .askw-ed-hr{display:inline-block;width:100%;height:0;vertical-align:middle;border-top:1px solid rgb(var(--reader-line)/.14)}
 body .askw-ed .cm-line.askw-ed-pre{font:14px/1.55 ${MONO};background:rgb(var(--reader-code)/.88);padding:0 18px}

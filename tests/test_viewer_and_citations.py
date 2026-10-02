@@ -192,6 +192,44 @@ class ViewerAndCitationTests(unittest.TestCase):
             with self.assertRaises(SourceConflict):
                 set_task(path, 4, False, base="stale")
 
+    def test_notes_render_obsidians_callouts_comments_tags_bare_urls_and_line_breaks(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw) / "vault"
+            vault.mkdir()
+            note = vault / "Note.md"
+            note.write_text(
+                "> [!info] A **bold** title\n> first line\n> second line\n\n"
+                "> [!faq]- Shut\n> > [!tip]\n> > inner\n\n"
+                "> [!Warning]+\n\n> plain quote\n\n"
+                "seen %%unseen%% seen\n\n%%\nsecretone\n\nsecrettwo\n%%\n\n"
+                "a #tag, #nested/tag, #1 and page#frag\n\n"
+                "go to https://obsidian.md/help. or (https://en.wikipedia.org/wiki/A_(b)) not `https://code`\n\n"
+                "```\n%% code %%\n```\n",
+                encoding="utf-8",
+            )
+            html = load_local_document(note, folder=str(vault), vault=VaultIndex.build(vault)).html
+            self.assertIn('<div class="callout" data-callout="info">', html)
+            self.assertIn('<span class="callout-title-inner">A <strong>bold</strong> title</span>', html)
+            self.assertIn("<p>first line<br>\nsecond line</p>", html)  # a vault note's newline is a break, as in Obsidian
+            self.assertIn('<details class="callout is-collapsible is-collapsed" data-callout="faq">', html)
+            self.assertIn('<span class="callout-title-inner">Tip</span>', html)  # no title: the type's
+            self.assertIn('<details class="callout is-collapsible" data-callout="warning" open>', html)
+            self.assertIn('<span class="callout-title-inner">Warning</span>', html)
+            self.assertIn("<blockquote>\n<p>plain quote</p>", html)
+            self.assertIn("seen  seen", html)
+            self.assertNotIn("unseen", html)
+            self.assertNotIn("secret", html)
+            self.assertIn("<code>%% code %%\n</code>", html)
+            self.assertIn('<span class="askw-tag">#tag</span>, <span class="askw-tag">#nested/tag</span>, #1 and page#frag', html)
+            self.assertIn('<a href="https://obsidian.md/help" rel="noreferrer noopener" target="_top">https://obsidian.md/help</a>.', html)
+            self.assertIn('href="https://en.wikipedia.org/wiki/A_(b)"', html)
+            self.assertIn("<code>https://code</code>", html)
+
+            # Outside a vault: CommonMark's soft break, and a `#` is text.
+            plain = load_local_document(note).html
+            self.assertIn("<p>first line\nsecond line</p>", plain)
+            self.assertIn("a #tag, #nested/tag", plain)
+
     def test_two_saves_against_one_version_never_both_land(self) -> None:
         # Two tabs (or a tick beside an autosave) saving over the same version: one lands, the other is refused. Each
         # thread is held at its version check until the other reaches its own, or half a second passes: unlocked, both

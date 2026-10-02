@@ -3151,6 +3151,39 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_callouts_fold_on_the_page_and_wear_their_colour_while_editing(self) -> None:
+        # Obsidian's `> [!type]` callouts: a coloured box on the page, `-` folded shut until its title is clicked, and the
+        # same type's colour on the note's lines in the editor. Both engines.
+        note = self.root / "callouts.md"
+        note.write_text("# Callouts\n\n> [!tip] A tip\n> Its body.\n\n> [!faq]- Folded\n> Inside the fold.\n", encoding="utf-8")
+        shots = os.environ.get("ONYX_SMOKE_SHOTS")
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    tip = frame.locator('main .callout[data-callout="tip"]')
+                    expect(tip.locator(".callout-title")).to_have_text("A tip")
+                    self.assertNotEqual(tip.evaluate("e => getComputedStyle(e).backgroundColor"), "rgba(0, 0, 0, 0)")
+                    folded = frame.locator('main details.callout[data-callout="faq"]')
+                    expect(folded.get_by_text("Inside the fold.")).to_be_hidden()
+                    folded.locator("summary").click()
+                    expect(folded.get_by_text("Inside the fold.")).to_be_visible()
+
+                    frame.locator("h1").click()
+                    page.keyboard.press("Meta+e")
+                    lines = frame.locator(".askw-ed .cm-line.askw-ed-callout")
+                    expect(lines).to_have_count(4)
+                    expect(frame.locator('.askw-ed .cm-line.askw-ed-callout-title[data-callout="tip"]')).to_have_count(1)
+                    colour = frame.locator('.askw-ed .cm-line.askw-ed-callout[data-callout="tip"]').first.evaluate(
+                        "e => getComputedStyle(e).backgroundColor")
+                    self.assertEqual(colour, tip.evaluate("e => getComputedStyle(e).backgroundColor"))
+                    if shots:
+                        page.screenshot(path=f"{shots}/editor-{engine}.png")
+                    browser.close()
+
     def test_tasks_tables_images_outline_and_find_all_work_while_editing(self) -> None:
         # What the page shows, the editor shows too: ~~strikethrough~~, ==highlights==, and tasks whose boxes tick the
         # file (on the page and in the editor); a table drawn as a table and an image as the picture until the cursor

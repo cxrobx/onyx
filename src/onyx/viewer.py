@@ -743,6 +743,252 @@ def _render_task(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> st
     return f'<input type="checkbox" class="askw-task-box"{" checked" if meta.get("done") else ""}{line} aria-label="Task">'
 
 
+# MARK: - Markdown: Obsidian's callouts, comments, tags, bare URLs and line breaks
+
+_CALLOUT_RE = re.compile(r"\[!([^\]\n]+)\]([+-]?)[ \t]*(.*)")
+# Obsidian's built-in types and their aliases, each with its default colour and Lucide icon. An unknown type is
+# drawn as a note, as Obsidian draws it.
+_CALLOUT_ALIASES = {
+    "summary": "abstract", "tldr": "abstract", "hint": "tip", "important": "tip", "check": "success",
+    "done": "success", "help": "question", "faq": "question", "caution": "warning", "attention": "warning",
+    "fail": "failure", "missing": "failure", "error": "danger", "cite": "quote",
+}
+_CALLOUT_ICONS = {
+    "note": '<path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"/><path d="m15 5 4 4"/>',
+    "abstract": '<rect width="8" height="4" x="8" y="2" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><path d="M12 11h4"/><path d="M12 16h4"/><path d="M8 11h.01"/><path d="M8 16h.01"/>',
+    "info": '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/>',
+    "todo": '<circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/>',
+    "tip": '<path d="M8.5 14.5A2.5 2.5 0 0 0 11 12c0-1.38-.5-2-1-3-1.072-2.143-.224-4.054 2-6 .5 2.5 2 4.9 4 6.5 2 1.6 3 3.5 3 5.5a7 7 0 1 1-14 0c0-1.153.433-2.294 1-3a2.5 2.5 0 0 0 2.5 2.5z"/>',
+    "success": '<path d="M20 6 9 17l-5-5"/>',
+    "question": '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>',
+    "warning": '<path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"/><path d="M12 9v4"/><path d="M12 17h.01"/>',
+    "failure": '<path d="M18 6 6 18"/><path d="m6 6 12 12"/>',
+    "danger": '<path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>',
+    "bug": '<path d="m8 2 1.88 1.88"/><path d="M14.12 3.88 16 2"/><path d="M9 7.13v-1a3.003 3.003 0 1 1 6 0v1"/><path d="M12 20c-3.3 0-6-2.7-6-6v-3a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v3c0 3.3-2.7 6-6 6"/><path d="M12 20v-9"/><path d="M6.53 9C4.6 8.8 3 7.1 3 5"/><path d="M6 13H2"/><path d="M3 21c0-2.1 1.7-3.9 3.8-4"/><path d="M20.97 5c0 2.1-1.6 3.8-3.5 4"/><path d="M22 13h-4"/><path d="M17.2 17c2.1.1 3.8 1.9 3.8 4"/>',
+    "example": '<path d="M3 12h.01"/><path d="M3 18h.01"/><path d="M3 6h.01"/><path d="M8 12h13"/><path d="M8 18h13"/><path d="M8 6h13"/>',
+    "quote": '<path d="M16 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/><path d="M5 3a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2 1 1 0 0 1 1 1v1a2 2 0 0 1-2 2 1 1 0 0 0-1 1v2a1 1 0 0 0 1 1 6 6 0 0 0 6-6V5a2 2 0 0 0-2-2z"/>',
+}
+_SVG = '<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">{}</svg>'
+_FOLD_ICON = '<span class="callout-fold" aria-hidden="true">' + _SVG.format('<path d="m9 18 6-6-6-6"/>') + "</span>"
+
+
+# Obsidian's default callout colours, light then dark, by the canonical type each alias draws as.
+_CALLOUT_COLOURS = {
+    "blue": ("8 109 221", "2 122 255", ("note", "info", "todo")),
+    "cyan": ("0 191 188", "83 223 221", ("abstract", "tip")),
+    "green": ("8 185 78", "68 207 110", ("success",)),
+    "orange": ("236 117 0", "233 151 63", ("question", "warning")),
+    "red": ("233 49 71", "251 70 76", ("failure", "danger", "bug")),
+    "purple": ("120 82 238", "168 130 255", ("example",)),
+    "gray": ("158 158 158", "158 158 158", ("quote",)),
+}
+
+
+def _callout_css() -> str:
+    light = ";".join(f"--callout-{name}:{rgb}" for name, (rgb, _, _) in _CALLOUT_COLOURS.items())
+    dark = ";".join(f"--callout-{name}:{rgb}" for name, (_, rgb, _) in _CALLOUT_COLOURS.items())
+    rules = [
+        f":root{{{light}}} @media(prefers-color-scheme:dark){{:root{{{dark}}}}}",
+        ".callout{--callout-color:var(--callout-blue);margin:1em 0;padding:12px 12px 12px 24px;border-radius:4px;"
+        "background:rgb(var(--callout-color)/.1);overflow:hidden}",
+        ".callout-title{display:flex;gap:6px;align-items:flex-start;color:rgb(var(--callout-color));font-weight:600;line-height:1.35}",
+        ".callout-icon,.callout-fold{display:flex;flex:0 0 auto;align-items:center;height:1.35em}",
+        "summary.callout-title{cursor:pointer;list-style:none} summary.callout-title::-webkit-details-marker{display:none}",
+        ".callout-fold{opacity:.7;transition:transform .1s} details.callout[open]>summary .callout-fold{transform:rotate(90deg)}",
+        ".callout-content>:first-child{margin-top:.6em} .callout-content>:last-child{margin-bottom:0} .callout-content:empty{display:none}",
+    ]
+    for name, (_, _, kinds) in _CALLOUT_COLOURS.items():
+        types = [kind for kind in kinds] + [alias for alias, kind in _CALLOUT_ALIASES.items() if kind in kinds]
+        rules.append(".callout:is(" + ",".join(f'[data-callout="{t}"]' for t in types) + f"){{--callout-color:var(--callout-{name})}}")
+    return "\n".join(rules)
+
+
+_CALLOUT_CSS = _callout_css()
+
+
+def _callouts(state: Any) -> None:
+    """``> [!info] Title``: a blockquote whose first line names a type is Obsidian's callout, ``[!faq]-`` folded shut
+    and ``[!faq]+`` foldable but open. Runs before ``inline``, so the title is parsed as Markdown like the body."""
+    tokens, out, stack = state.tokens, [], []
+    i = 0
+    while i < len(tokens):
+        token = tokens[i]
+        if token.type == "blockquote_close":
+            meta = stack.pop()
+            if meta is not None:
+                close = Token("askw_callout_close", "div", -1)
+                close.meta, close.block = meta, True
+                out.append(close)
+                i += 1
+                continue
+        if token.type != "blockquote_open":
+            out.append(token)
+            i += 1
+            continue
+        found = None
+        if i + 2 < len(tokens) and tokens[i + 1].type == "paragraph_open" and tokens[i + 2].type == "inline":
+            first, _, rest = tokens[i + 2].content.partition("\n")
+            found = _CALLOUT_RE.fullmatch(first.strip())
+        if not found:
+            stack.append(None)
+            out.append(token)
+            i += 1
+            continue
+        raw = found.group(1).strip()
+        kind = _CALLOUT_ALIASES.get(raw.lower(), raw.lower())
+        meta = {
+            "type": re.sub(r"[^a-z0-9_-]+", "-", raw.lower()),
+            "icon": kind if kind in _CALLOUT_ICONS else "note",
+            "fold": found.group(2),
+        }
+        stack.append(meta)
+        opening = Token("askw_callout_open", "div", 1)
+        opening.meta, opening.block, opening.map = meta, True, token.map
+        title = Token("inline", "", 0)
+        title.content, title.map, title.children = found.group(3).strip() or raw[:1].upper() + raw[1:], token.map, []
+        out += [opening, Token("askw_callout_title_open", "div", 1), title, Token("askw_callout_title_close", "div", -1)]
+        out[-3].meta = out[-1].meta = meta
+        content = Token("askw_callout_content_open", "div", 1)
+        content.attrSet("class", "callout-content")
+        content.block = True
+        out.append(content)
+        if rest.strip():
+            tokens[i + 2].content = rest
+            i += 1  # keep the paragraph, minus its first line
+        else:
+            i += 4  # the first line was the whole paragraph
+    state.tokens[:] = out
+
+
+def _render_callout_open(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    meta = tokens[idx].meta
+    if not meta["fold"]:
+        return f'<div class="callout" data-callout="{meta["type"]}">\n'
+    shut = meta["fold"] == "-"
+    return f'<details class="callout is-collapsible{" is-collapsed" if shut else ""}" data-callout="{meta["type"]}"{"" if shut else " open"}>\n'
+
+
+def _render_callout_title_open(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    meta = tokens[idx].meta
+    tag = "summary" if meta["fold"] else "div"
+    icon = _SVG.format(_CALLOUT_ICONS[meta["icon"]])
+    return f'<{tag} class="callout-title"><span class="callout-icon" aria-hidden="true">{icon}</span><span class="callout-title-inner">'
+
+
+def _render_callout_title_close(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    fold = tokens[idx].meta["fold"]
+    return "</span>" + (_FOLD_ICON + "</summary>\n" if fold else "</div>\n")
+
+
+def _render_callout_close(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    return "</div>\n" + ("</details>\n" if tokens[idx].meta["fold"] else "</div>\n")
+
+
+def _comment_block(state: Any, start: int, end: int, silent: bool) -> bool:
+    """A ``%%`` comment that opens a line hides everything up to the ``%%`` that closes it, blank lines included, or
+    to the end of the note when nothing does, as in Obsidian. One that closes mid-line is the inline rule's."""
+    if state.sCount[start] - state.blkIndent >= 4:
+        return False
+    pos, line_end = state.bMarks[start] + state.tShift[start], state.eMarks[start]
+    if not state.src.startswith("%%", pos):
+        return False
+    line, close = start, state.src.find("%%", pos + 2, line_end)
+    while close < 0 and line + 1 < end:
+        line += 1
+        close = state.src.find("%%", state.bMarks[line] + state.tShift[line], state.eMarks[line])
+    if close >= 0 and state.src[close + 2 : state.eMarks[line]].strip():
+        return False
+    if not silent:
+        state.line = line + 1
+    return True
+
+
+def _comment_inline(state: Any, silent: bool) -> bool:
+    if not state.src.startswith("%%", state.pos):
+        return False
+    close = state.src.find("%%", state.pos + 2, state.posMax)
+    if close < 0:
+        return False
+    state.pos = close + 2  # hidden: nothing is pushed
+    return True
+
+
+_TAG_RE = re.compile(r"#([^\W][\w/-]*)")
+
+
+def _tag_rule(state: Any, silent: bool) -> bool:
+    """``#tag`` and ``#nested/tag`` in a vault note, drawn as the Properties box draws a note's tags. A tag needs a space
+    (or the line's start) before it and a character that isn't a digit, so ``#1`` and ``page#anchor`` stay text."""
+    ctx = (state.env or {}).get("askw") if state.env is not None else None
+    if ctx is None or ctx.vault is None or state.src[state.pos] != "#":
+        return False
+    if state.pos > 0 and not state.src[state.pos - 1].isspace():
+        return False
+    found = _TAG_RE.match(state.src, state.pos, state.posMax)
+    if not found or found.group(1).replace("/", "").replace("-", "").replace("_", "").isdigit():
+        return False
+    if not silent:
+        token = state.push("askw_tag_open", "span", 1)
+        token.attrSet("class", "askw-tag")
+        state.push("text", "", 0).content = found.group(0)
+        state.push("askw_tag_close", "span", -1)
+    state.pos = found.end()
+    return True
+
+
+_BARE_URL_RE = re.compile(r"(?<![\w/.@])https?://[^\s<>\"'`]+")
+
+
+def _bare_url_end(url: str) -> str:
+    # Trailing punctuation ends the sentence, not the address; a `)` stays when the address opened one (Wikipedia).
+    while url and url[-1] in ".,;:!?*_~'\")]}":
+        if url[-1] == ")" and url.count("(") >= url.count(")"):
+            break
+        url = url[:-1]
+    return url
+
+
+def _bare_urls(state: Any) -> None:
+    """``https://example.com`` written bare is a link, as Obsidian and GitHub draw it. Text inside a link or code is
+    left alone; only the http(s) schemes are linked."""
+    for block in state.tokens:
+        if block.type != "inline" or not block.children:
+            continue
+        children, depth = [], 0
+        for child in block.children:
+            if child.type == "link_open":
+                depth += 1
+            elif child.type == "link_close":
+                depth -= 1
+            if child.type != "text" or depth or "://" not in child.content:
+                children.append(child)
+                continue
+            text, pos = child.content, 0
+            for found in _BARE_URL_RE.finditer(text):
+                if found.start() < pos:
+                    continue
+                url = _bare_url_end(found.group(0))
+                if not url.split("://", 1)[1]:
+                    continue
+                if found.start() > pos:
+                    children.append(Token("text", "", 0, content=text[pos:found.start()]))
+                link = Token("link_open", "a", 1)
+                link.attrSet("href", url)
+                link.markup, link.info = "linkify", "auto"
+                children += [link, Token("text", "", 0, content=url), Token("link_close", "a", -1)]
+                pos = found.start() + len(url)
+            if pos < len(text):
+                children.append(Token("text", "", 0, content=text[pos:]))
+        block.children = children
+
+
+def _render_softbreak(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    # Obsidian draws a vault note's single newline as a line break (its "Strict line breaks" is off by default). Other
+    # Markdown keeps CommonMark's soft break, as GitHub draws a README.
+    ctx = (env or {}).get("askw") if env is not None else None
+    return "<br>\n" if ctx is not None and ctx.vault is not None else "\n"
+
+
 def _build_markdown() -> MarkdownIt:
     # markdown-it escapes raw HTML and rejects unsafe URL schemes under the
     # CommonMark preset. Tables are the one GitHub-style extension readers need
@@ -762,10 +1008,21 @@ def _build_markdown() -> MarkdownIt:
     md.inline.ruler.before("link", "wikilink", _wikilink_rule)
     md.inline.ruler.after("strikethrough", "askw_highlight", _highlight_rule)
     md.inline.ruler2.after("strikethrough", "askw_highlight", _highlight_post)
+    md.inline.ruler.before("backticks", "askw_comment", _comment_inline)
+    md.inline.ruler.before("link", "askw_tag", _tag_rule)
+    # Before ``fence``, so it can interrupt a paragraph; a ``%%`` inside a code block is code, not a comment.
+    md.block.ruler.before("fence", "askw_comment", _comment_block, {"alt": ["paragraph", "reference", "blockquote", "list"]})
+    md.core.ruler.before("inline", "askw_callouts", _callouts)
     # After ``text_join``, which merges the ``[`` and `` ]`` of a box into the text they open.
     md.core.ruler.push("askw_tasks", _task_lists)
+    md.core.ruler.push("askw_bare_urls", _bare_urls)
     md.add_render_rule("link_open", _render_link_open)
     md.add_render_rule("askw_task", _render_task)
+    md.add_render_rule("softbreak", _render_softbreak)
+    md.add_render_rule("askw_callout_open", _render_callout_open)
+    md.add_render_rule("askw_callout_title_open", _render_callout_title_open)
+    md.add_render_rule("askw_callout_title_close", _render_callout_title_close)
+    md.add_render_rule("askw_callout_close", _render_callout_close)
     return md
 
 
@@ -840,8 +1097,9 @@ hr{{border:0;border-top:1px solid rgb(var(--reader-line)/.14);margin:2em 0}} img
 .askw-properties dl{{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 18px;margin:10px 0 2px}} .askw-properties dt{{color:rgb(var(--reader-muted));font-weight:600}} .askw-properties dd{{margin:0;overflow-wrap:anywhere}} .askw-properties pre{{margin:8px 0 0}} .askw-empty{{color:rgb(var(--reader-faint))}}
 li.askw-task{{list-style:none}} .askw-task-box{{margin:0 .55em 0 -1.45em;vertical-align:-.1em;cursor:pointer}} li.askw-task.is-done>.askw-task-label,li.askw-task.is-done>p>.askw-task-label{{color:rgb(var(--reader-faint));text-decoration:line-through}}
 mark{{padding:0 .1em;border-radius:3px;background:rgb(255 208 0/.4);color:inherit}}
-.askw-tag{{display:inline-block;margin:0 4px 2px 0;padding:1px 8px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}}
+.askw-tag{{display:inline-block;margin:0 4px 2px 0;padding:1px 8px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}} main :is(p,li,td,th,.callout-title-inner)>.askw-tag{{margin:0}}
 .askw-wikilink-missing{{border-bottom:1px dotted rgb(var(--reader-faint));color:rgb(var(--reader-muted));cursor:help}} a.askw-embed{{display:inline-block;padding:1px 8px;border:1px dashed rgb(var(--reader-line)/.25);border-radius:6px;text-decoration:none}} a.askw-embed::before{{content:"⧉ ";opacity:.6}}
+{_CALLOUT_CSS}
 @media(prefers-color-scheme:dark){{:root{{--reader-bg:24 24 24;--reader-pane:31 31 31;--reader-ink:245 245 245;--reader-muted:205 205 205;--reader-faint:143 143 143;--reader-line:255 255 255;--reader-code:48 48 48}} body{{background:rgb(var(--reader-bg)/.70)}} main{{background:rgb(var(--reader-pane)/.78);box-shadow:0 18px 60px rgb(0 0 0/.28)}}}}
 @media(max-width:720px){{main{{padding:36px 24px}}}}
 @media(prefers-reduced-transparency:reduce){{body,main,.askw-pdf-page{{backdrop-filter:none}} body{{background:rgb(var(--reader-bg))}} main{{background:rgb(var(--reader-pane))}}}}

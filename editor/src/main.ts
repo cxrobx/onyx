@@ -11,10 +11,10 @@ import { commonmarkLanguage, markdownKeymap } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { EditorSelection, EditorState, Prec, StateCommand, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, keymap } from "@codemirror/view";
-import { parser as commonmark, Strikethrough, Table, TaskList } from "@lezer/markdown";
+import { Autolink, parser as commonmark, Strikethrough, Table, TaskList } from "@lezer/markdown";
 
 import { lineChanges } from "./diff";
-import { highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
+import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { CSS } from "./style";
 
 /**
@@ -44,12 +44,12 @@ export interface Session {
   poll(sig: string): void;
 }
 
-// CommonMark with tables, strikethrough, highlights and tasks, as the reader renders (viewer.py), plus wikilinks. The Language is built here rather than
+// CommonMark with tables, strikethrough, highlights, tasks, bare URLs, `%%comments%%` and `#tags`, as the reader renders (viewer.py), plus wikilinks. The Language is built here rather than
 // through `markdown()` so the HTML and JavaScript grammars that bundles for inline HTML stay out of this file: the
 // reader escapes raw HTML, so there is nothing for them to highlight. It shares `commonmarkLanguage`'s data, which is
 // what the Markdown keymap checks, so Enter still continues a list and Backspace still lifts one.
 const markdownSupport = new LanguageSupport(
-  new Language(commonmarkLanguage.data, commonmark.configure([Table, Strikethrough, TaskList, highlights, wikilinks]), [], "markdown"),
+  new Language(commonmarkLanguage.data, commonmark.configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags]), [], "markdown"),
   [Prec.high(keymap.of(markdownKeymap))],
 );
 

@@ -63,6 +63,34 @@ export const highlights: MarkdownConfig = {
   }],
 };
 
+// `%%comment%%` and `#tag`, as Obsidian writes them. The reader hides a comment and draws a tag as a pill
+// (viewer.py, `_comment_inline` and `_tag_rule`); here a comment is source to edit, so it is muted, not hidden.
+export const comments: MarkdownConfig = {
+  defineNodes: ["Comment"],
+  parseInline: [{
+    name: "Comment",
+    before: "InlineCode",
+    parse(cx, next, pos) {
+      if (next !== 37 || cx.char(pos + 1) !== 37) return -1;
+      const close = cx.slice(pos + 2, cx.end).indexOf("%%");
+      return close < 0 ? -1 : cx.addElement(cx.elt("Comment", pos, pos + 2 + close + 2));
+    },
+  }],
+};
+const TAG = /^#[\p{L}\p{N}_][\p{L}\p{N}_\/-]*/u;  // and not only digits: `#1` is text
+export const hashtags: MarkdownConfig = {
+  defineNodes: ["Hashtag"],
+  parseInline: [{
+    name: "Hashtag",
+    parse(cx, next, pos) {
+      if (next !== 35 || (pos > cx.offset && !/\s/.test(cx.slice(pos - 1, pos)))) return -1;
+      const found = TAG.exec(cx.slice(pos, cx.end));
+      if (!found || /^[\d\/_-]+$/.test(found[0].slice(1))) return -1;
+      return cx.addElement(cx.elt("Hashtag", pos, pos + found[0].length));
+    },
+  }],
+};
+
 // MARK: - What a stretch of inline Markdown reads as, for a table's cells and the outline's headings
 
 export interface Run { t: string; s: string; href?: string; wiki?: string }
@@ -71,7 +99,7 @@ const SILENT = new Set(["EmphasisMark", "CodeMark", "StrikethroughMark", "Highli
   "LinkLabel", "WikiLinkMark", "HeaderMark", "QuoteMark", "TableDelimiter", "TaskMarker"]);
 const STYLE: Record<string, string> = {
   Emphasis: "askw-ed-em", StrongEmphasis: "askw-ed-strong", InlineCode: "askw-ed-code",
-  Strikethrough: "askw-ed-strike", Highlight: "askw-ed-highlight",
+  Strikethrough: "askw-ed-strike", Highlight: "askw-ed-highlight", Hashtag: "askw-ed-tag", Comment: "askw-ed-comment",
 };
 
 export function inlineRuns(doc: Text, node: SyntaxNode): Run[] {
@@ -88,6 +116,10 @@ export function inlineRuns(doc: Text, node: SyntaxNode): Run[] {
   };
   const visit = (n: SyntaxNode, s: string, extra: Partial<Run>) => {
     const name = n.name;
+    if (name === "URL" && n.parent?.name !== "Link" && n.parent?.name !== "Image" && n.parent?.name !== "Autolink") {
+      const href = doc.sliceString(n.from, n.to);
+      return put(href, `${s} askw-ed-link`, { href });
+    }
     if (SILENT.has(name)) return;
     if (name in STYLE) return walk(n, `${s} ${STYLE[name]}`, extra);
     if (name === "Link") {
@@ -357,6 +389,13 @@ function build(view: EditorView): DecorationSet {
         }
         switch (name) {
           case "Link": {
+            // A callout's `[!type]` reads as a shortcut reference link; it is the callout's marker, muted like `>`.
+            if (/^\[![^\]\n]+\]$/.test(doc.sliceString(node.from, node.to))
+              && /^\s*>[\s>]*$/.test(doc.sliceString(doc.lineAt(node.from).from, node.from))) {
+              const fold = /[+-]/.test(doc.sliceString(node.to, node.to + 1)) ? 1 : 0;
+              out.push(dim.range(node.from, node.to + fold));
+              return false;
+            }
             const linkMarks = node.getChildren("LinkMark");
             if (linkMarks.length < 2) return;
             const [open, close] = linkMarks, url = node.getChild("URL");
@@ -427,9 +466,32 @@ function build(view: EditorView): DecorationSet {
             return false;
           }
           case "Blockquote": {
-            lines(node.from, node.to, "askw-ed-quote");
+            // `> [!type] Title` is a callout (viewer.py, `_callouts`): its lines wear the type's colour, its first the title's.
+            const callout = /^\s*>\s?\[!([^\]\n]+)\]/.exec(doc.lineAt(node.from).text);
+            if (!callout) { lines(node.from, node.to, "askw-ed-quote"); return; }
+            const type = callout[1].trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
+            for (let n = doc.lineAt(node.from).number, last = lastLine(node.from, node.to); n <= last; n++) {
+              const edge = (n === doc.lineAt(node.from).number ? " askw-ed-callout-title" : "") + (n === last ? " askw-ed-callout-last" : "");
+              out.push(Decoration.line({ class: "askw-ed-callout" + edge, attributes: { "data-callout": type } }).range(doc.line(n).from));
+            }
             return;
           }
+          case "URL": {
+            // A bare address (GFM's autolink): a link, as the reader draws it. One inside a link is that link's.
+            const parent = node.parent?.name;
+            if (parent === "Link" || parent === "Image" || parent === "Autolink") return;
+            out.push(Decoration.mark({
+              class: "askw-ed-link",
+              attributes: touches(node.from, node.to) ? {} : { "data-askw-href": doc.sliceString(node.from, node.to) },
+            }).range(node.from, node.to));
+            return;
+          }
+          case "Hashtag":
+            out.push(cls("askw-ed-tag").range(node.from, node.to));
+            return;
+          case "Comment":
+            out.push(cls("askw-ed-comment").range(node.from, node.to));
+            return false;
           case "QuoteMark": {
             if (onLine(node.from, node.to)) { out.push(dim.range(node.from, node.to)); return; }
             const after = doc.sliceString(node.to, node.to + 1) === " " ? node.to + 1 : node.to;
