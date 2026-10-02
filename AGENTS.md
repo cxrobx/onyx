@@ -101,9 +101,19 @@ document referenced.
 `test_a_note_edited_through_a_linked_folder_saves_to_its_real_file_and_follows_its_links`
 
 **Vault mutations stay inside the vault.** Link, folder and reorganise routes
-write only within the vault and never through a symlink target.
+(`/api/vault/{key}/…`, for Artifacts and every notes vault) write only within the
+vault and never through a symlink target. A notes move or rename also rewrites
+the links it would break in other notes (`relink.py`), and those writes keep the
+save path's rules: each goes through `viewer.write_source` against the version
+the plan read, so an edit made meanwhile is reported, never overwritten, and a
+note inside a linked folder is reported, never written. An Artifacts page's
+Rename never edits its file or target: the name lives in the folder's
+`.onyx.json`.
 → `test_link_and_folder_routes_write_only_inside_the_vault`,
-`test_reorganising_moves_only_what_the_vault_owns_and_never_a_target`
+`test_reorganising_moves_only_what_the_vault_owns_and_never_a_target`,
+`test_notes_reorganise_inside_their_vault_and_carry_their_links_asks_and_place`,
+`test_an_edit_made_after_the_plan_is_never_overwritten`,
+`test_notes_in_a_linked_folder_are_reported_not_written`
 
 **The phone mirror is inert, fenced and sealed.** `src/onyx/mirror/` publishes an
 encrypted, read-only copy of the vault for a phone (`docs/plans/phone-mirror.md`,

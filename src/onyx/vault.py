@@ -29,6 +29,11 @@ empty, so there is somewhere to link or drag a page into; a linked folder shows
 only once a page sits somewhere beneath it. What the vault owns — an entry
 directly in one of its own folders — can be moved, renamed, pinned to the top
 of its folder or removed; see *Reorganising Artifacts* below.
+
+A notes vault reorganises by the same rules (``plan_move``, ``move_entry``,
+``plan_rename``, ``rename_entry``, ``create_folder``, each with the vault's
+``label`` for its messages): only what it owns, never inside a linked folder.
+What moving a note does to the links that point at it is ``relink.py``'s.
 """
 
 from __future__ import annotations
@@ -244,7 +249,7 @@ def _clean_entry_name(name: str) -> str:
     return name
 
 
-def writable_folder(root: Path | str, rel: str) -> Path:
+def writable_folder(root: Path | str, rel: str, label: str = "Artifacts") -> Path:
     """Resolve ``rel`` to a folder the app may write into, or raise ValueError.
 
     The app only ever writes inside the vault's OWN folders. A folder reached
@@ -256,27 +261,27 @@ def writable_folder(root: Path | str, rel: str) -> Path:
     rel = str(rel or "").strip().strip("/")
     parts = [part for part in rel.split("/") if part] if rel else []
     if any(part in {".", ".."} or part.startswith(".") for part in parts):
-        raise ValueError("That folder is not inside Artifacts.")
+        raise ValueError(f"That folder is not inside {label}.")
     current = base
     for part in parts:
         current = current / part
         if os.path.islink(current):
             raise ValueError(
                 f"“{part}” is a linked folder, so it belongs to another tree. "
-                "Add to a folder that lives in Artifacts instead."
+                f"Use a folder that lives in {label} instead."
             )
     if not current.is_dir():
-        raise ValueError("That folder does not exist in Artifacts.")
+        raise ValueError(f"That folder does not exist in {label}.")
     real_base = Path(os.path.realpath(base))
     real_current = Path(os.path.realpath(current))
     if not (real_current == real_base or real_current.is_relative_to(real_base)):
-        raise ValueError("That folder is not inside Artifacts.")
+        raise ValueError(f"That folder is not inside {label}.")
     return current
 
 
-def create_folder(root: Path | str, parent_rel: str, name: str) -> Path:
-    """Make a new (real) folder in Artifacts."""
-    folder = writable_folder(root, parent_rel) / _clean_entry_name(name)
+def create_folder(root: Path | str, parent_rel: str, name: str, label: str = "Artifacts") -> Path:
+    """Make a new (real) folder in one of the vault's own folders."""
+    folder = writable_folder(root, parent_rel, label) / _clean_entry_name(name)
     if os.path.lexists(folder):
         raise ValueError(f"“{folder.name}” already exists there.")
     folder.mkdir()
@@ -325,9 +330,9 @@ def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str
     return link
 
 
-# MARK: - Reorganising Artifacts
+# MARK: - Reorganising Artifacts (and the notes vaults)
 #
-# Moving, renaming, pinning and removing act on what Artifacts OWNS: an entry
+# Moving, renaming, pinning and removing act on what the vault OWNS: an entry
 # sitting directly in one of its own folders — a link, or a folder made here.
 # Anything deeper, inside a linked folder, is a file in somebody else's tree,
 # and handling it would reach through the link into the real folder.
@@ -335,20 +340,20 @@ def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str
 PINS_FILE = ".onyx.json"  # a folder's own settings: {"pinned": [entry names, first first]}
 
 
-def owned_entry(root: Path | str, path: Path | str) -> Path:
-    """``path`` if Artifacts owns it, else ValueError. Lexical, like every path here."""
+def owned_entry(root: Path | str, path: Path | str, label: str = "Artifacts") -> Path:
+    """``path`` if the vault owns it, else ValueError. Lexical, like every path here."""
     base = normalize(root)
     entry = normalize(path)
     if entry == base or not is_inside(entry, base) or entry.name.startswith("."):
-        raise ValueError("That is not in Artifacts.")
+        raise ValueError(f"That is not in {label}.")
     if first_link(entry.parent, base) is not None:
         raise ValueError(
             f"“{entry.name}” is inside a linked folder, so it belongs to another tree. Move or rename the link instead."
         )
     parent_rel = entry.parent.relative_to(base).as_posix()  # "." for the top level
-    writable_folder(base, "" if parent_rel == "." else parent_rel)
+    writable_folder(base, "" if parent_rel == "." else parent_rel, label)
     if not os.path.lexists(entry):
-        raise ValueError(f"“{entry.name}” is no longer in Artifacts.")
+        raise ValueError(f"“{entry.name}” is no longer in {label}.")
     return entry
 
 
@@ -423,49 +428,128 @@ def _keep_links_pointing(entry: Path) -> None:
                     fix(Path(dirpath) / name)
 
 
-def move_entry(root: Path | str, path: Path | str, dest_rel: str) -> Path:
-    """Move an entry Artifacts owns into another of its folders; its new path.
+def plan_move(root: Path | str, path: Path | str, dest_rel: str, label: str = "Artifacts") -> tuple[Path, Path]:
+    """Where moving an entry the vault owns into another of its folders would put it: ``(entry, moved)``, or ValueError.
 
-    ``os.rename`` moves a link itself, never what it points at, so the target
-    stays put and the link still resolves from its new folder. A pin moves with
-    the entry.
+    Checked before anything changes, so the links a move would break can be worked out first (relink.py).
     """
-    entry = owned_entry(root, path)
-    dest = writable_folder(root, dest_rel)
+    entry = owned_entry(root, path, label)
+    dest = writable_folder(root, dest_rel, label)
     if dest == entry.parent:
-        return entry
+        return entry, entry
     if not os.path.islink(entry) and entry.is_dir() and is_inside(dest, entry):
         raise ValueError(f"“{entry.name}” can't go inside itself.")
     moved = dest / entry.name
     if os.path.lexists(moved):
         raise ValueError(f"“{entry.name}” already exists there.")
+    return entry, moved
+
+
+def move_entry(root: Path | str, path: Path | str, dest_rel: str, label: str = "Artifacts") -> Path:
+    """Move an entry the vault owns into another of its folders; its new path.
+
+    ``os.rename`` moves a link itself, never what it points at, so the target
+    stays put and the link still resolves from its new folder. A pin and a
+    display name move with the entry.
+    """
+    entry, moved = plan_move(root, path, dest_rel, label)
+    if moved == entry:
+        return entry
     pinned = entry.name in read_pins(entry.parent)
+    shown = read_names(entry.parent).get(entry.name)
     _keep_links_pointing(entry)
     os.rename(entry, moved)
     _update_pins(entry.parent, lambda pins: pins)  # the old name is gone, so it drops out
+    _update_names(entry.parent, lambda names: names)
     if pinned:
-        _update_pins(dest, lambda pins: pins + [moved.name])
+        _update_pins(moved.parent, lambda pins: pins + [moved.name])
+    if shown:
+        _update_names(moved.parent, lambda names: {**names, moved.name: shown})
     return moved
 
 
-def rename_entry(root: Path | str, path: Path | str, name: str) -> Path:
-    """Rename an entry Artifacts owns, in place; its new path. A page link keeps its extension."""
-    entry = owned_entry(root, path)
+_SUFFIX_FAMILIES = (frozenset(HTML_EXTENSIONS), frozenset({".md", ".markdown"}))
+
+
+def plan_rename(root: Path | str, path: Path | str, name: str, label: str = "Artifacts") -> tuple[Path, Path]:
+    """Where renaming an entry the vault owns would put it: ``(entry, renamed)``, or ValueError.
+
+    A file keeps its kind: a page stays ``.html`` and a note ``.md`` unless the new name gives one of the same family,
+    so "Plan" renames ``Old.md`` to ``Plan.md``, never to a file Obsidian no longer lists.
+    """
+    entry = owned_entry(root, path, label)
     new_name = _clean_entry_name(name)
-    if (
-        not os.path.isdir(entry)
-        and entry.suffix.lower() in HTML_EXTENSIONS
-        and Path(new_name).suffix.lower() not in HTML_EXTENSIONS
-    ):
-        new_name += entry.suffix
+    if not os.path.isdir(entry) and entry.suffix:
+        old, new = entry.suffix.lower(), Path(new_name).suffix.lower()
+        family = next((f for f in _SUFFIX_FAMILIES if old in f), frozenset({old}))
+        if new not in family:
+            new_name += entry.suffix
     renamed = entry.parent / new_name
+    if renamed != entry and os.path.lexists(renamed) and not _same_entry(entry, renamed):
+        raise ValueError(f"“{new_name}” already exists there.")
+    return entry, renamed
+
+
+def rename_entry(root: Path | str, path: Path | str, name: str, label: str = "Artifacts") -> Path:
+    """Rename an entry the vault owns, in place; its new path."""
+    entry, renamed = plan_rename(root, path, name, label)
     if renamed == entry:
         return entry
-    if os.path.lexists(renamed) and not _same_entry(entry, renamed):
-        raise ValueError(f"“{new_name}” already exists there.")
     os.rename(entry, renamed)
+    new_name = renamed.name
     _update_pins(entry.parent, lambda pins: [new_name if pin == entry.name else pin for pin in pins])
+    _update_names(entry.parent, lambda names: {new_name if k == entry.name else k: v for k, v in names.items()})
     return renamed
+
+
+def read_names(folder: Path) -> dict[str, str]:
+    """The names a folder's pages are shown by instead of their titles (Rename on an Artifacts page), by entry name."""
+    try:
+        data = json.loads((folder / PINS_FILE).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    names = data.get("names") if isinstance(data, dict) else None
+    if not isinstance(names, dict):
+        return {}
+    return {k: v for k, v in names.items() if isinstance(k, str) and k and isinstance(v, str) and v.strip()}
+
+
+def _update_names(folder: Path, change) -> None:
+    """Rewrite ``folder``'s display names through ``change(dict) -> dict``; names of entries no longer there drop out."""
+    path = folder / PINS_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        data = {}
+    data = data if isinstance(data, dict) else {}
+    before = read_names(folder)
+    after = {k: v.strip() for k, v in change(dict(before)).items() if v and v.strip() and os.path.lexists(folder / k)}
+    if after == before:
+        return
+    if after:
+        data["names"] = after
+    else:
+        data.pop("names", None)
+    if not data:
+        path.unlink(missing_ok=True)
+        return
+    staged = folder / f"{PINS_FILE}.tmp"
+    staged.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+    os.replace(staged, path)
+
+
+def set_display_name(root: Path | str, path: Path | str, name: str) -> Path:
+    """Show an Artifacts page by ``name`` rather than its ``<title>``; an empty name goes back to the title.
+
+    The page itself is somebody else's file (the link's target), so its title is never edited: the name lives in its
+    folder's ``.onyx.json`` beside the pins, and moves and renames with the link.
+    """
+    entry = owned_entry(root, path)
+    shown = str(name or "").strip()
+    if len(shown) > 300 or "\n" in shown:
+        raise ValueError("Use a name of one line.")
+    _update_names(entry.parent, lambda names: {**names, entry.name: shown})
+    return entry
 
 
 def set_pinned(root: Path | str, path: Path | str, pinned: bool) -> Path:
@@ -501,6 +585,7 @@ def remove_entry(root: Path | str, path: Path | str) -> str:
     else:
         raise ValueError(f"“{entry.name}” is a real file, not a link, so Onyx leaves it alone. Remove it in Finder.")
     _update_pins(entry.parent, lambda pins: pins)
+    _update_names(entry.parent, lambda names: names)
     return removed
 
 
@@ -589,6 +674,7 @@ class VaultFile:
     page_dir: bool = False
     missing: bool = False
     summary: str = ""
+    named: bool = False  # Artifacts: shown by a name given in Onyx (Rename), not by its title
 
     @property
     def depth(self) -> int:
@@ -629,6 +715,8 @@ class VaultIndex:
     listed_dirs: list[str] = field(default_factory=list)
     # Artifacts: each of its own folders' pinned entry names (PINS_FILE), by folder rel.
     pins: dict[str, list[str]] = field(default_factory=dict)
+    # Artifacts: each of its own folders' display names (Rename on a page), by folder rel, then entry name.
+    names: dict[str, dict[str, str]] = field(default_factory=dict)
     # Cloud placeholder folders the walk stepped round (SF_DATALESS), being fetched in the background.
     placeholders: list[str] = field(default_factory=list)
     _by_rel: dict[str, VaultFile] = field(default_factory=dict, repr=False)
@@ -681,6 +769,10 @@ class VaultIndex:
                 keep.append(name)
             keep.sort(key=str.casefold)
             dirnames[:] = keep
+            # A folder with nothing in it still shows, as in Obsidian, so a folder just made takes a drop. One that
+            # holds only attachments stays out of the tree, which lists notes.
+            if rel_dir and not keep and not any(not f.startswith(".") for f in filenames):
+                index.listed_dirs.append(rel_dir)
             for filename in sorted(filenames, key=str.casefold):
                 if filename.startswith("."):
                     continue
@@ -733,6 +825,9 @@ class VaultIndex:
                 index.truncated = True
                 return False
             meta = html_page_meta(path)
+            entry_rel = rel.rpartition("/")[0] if page_dir else rel
+            folder_rel, _, entry_name = entry_rel.rpartition("/")
+            shown = index.names.get(folder_rel, {}).get(entry_name)
             index.files.append(
                 VaultFile(
                     path=path,
@@ -740,7 +835,8 @@ class VaultIndex:
                     name=path.name,
                     stem_key=os.path.splitext(path.name)[0].casefold(),
                     kind="note",
-                    title=meta[0] if meta else "",
+                    title=shown or (meta[0] if meta else ""),
+                    named=bool(shown),
                     mtime=meta[1] if meta else 0.0,
                     page_dir=page_dir,
                     missing=meta is None,
@@ -799,6 +895,7 @@ class VaultIndex:
                 rel_dir == linked or rel_dir.startswith(linked + "/") for linked in index.symlinked_dirs
             ):
                 index.pins[rel_dir] = read_pins(current)
+                index.names[rel_dir] = read_names(current)
             for filename in sorted(filenames, key=str.casefold):
                 if filename.startswith("."):
                     continue
@@ -856,33 +953,28 @@ class VaultIndex:
             if rel in self.symlinked_dirs:
                 node["symlink"] = True
             parent = folder_node(parent_rel)
-            if html:
-                # The vault's own folders take new links; a linked one (or
-                # anything under it) is another tree — see writable_folder.
-                node["rel"] = rel
-                node["linked"] = bool(node.get("symlink") or parent.get("linked"))
-                if not parent.get("linked"):
-                    owned(node, parent_rel, self.root / rel)
+            # The vault's own folders take a drop, a new folder or a link; a linked one (or anything under it) is
+            # another tree — see writable_folder. In Notes as in Artifacts.
+            node["rel"] = rel
+            node["linked"] = bool(node.get("symlink") or parent.get("linked"))
+            if not parent.get("linked"):
+                owned(node, parent_rel, self.root / rel)
             dirs[rel] = node
             parent["children"].append(node)
             return node
 
-        if html:
-            for rel in self.listed_dirs:
-                folder_node(rel)  # projects and your own folders show before they hold a page
+        for rel in self.listed_dirs:
+            folder_node(rel)  # projects and your own folders show before they hold a page
 
         for item in self.files:
             if item.kind != "note":
                 continue
             if not html:
-                folder_node(item.folder)["children"].append(
-                    {
-                        "name": item.name,
-                        "path": str(item.path),
-                        "kind": "file",
-                        "ext": item.path.suffix.lower(),
-                    }
-                )
+                parent = folder_node(item.folder)
+                node = {"name": item.name, "path": str(item.path), "kind": "file", "ext": item.path.suffix.lower()}
+                if not parent.get("linked"):
+                    owned(node, item.folder, item.path)
+                parent["children"].append(node)
                 continue
             parent_rel = item.entry_rel.rpartition("/")[0]
             node = {
@@ -895,6 +987,8 @@ class VaultIndex:
             }
             if item.summary:
                 node["summary"] = item.summary
+            if item.named:
+                node["named"] = True
             if item.missing:
                 node["missing"] = True
                 try:
@@ -920,9 +1014,8 @@ class VaultIndex:
                     sort(child)
 
         sort(root_node)
-        if html:
-            root_node["rel"] = ""
-            root_node["linked"] = False
+        root_node["rel"] = ""
+        root_node["linked"] = False
         return root_node
 
     # MARK: - Queries

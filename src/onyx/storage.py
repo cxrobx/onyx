@@ -519,6 +519,29 @@ class Storage:
             self._db.commit()
         return cursor.rowcount > 0
 
+    def move_source(self, old: str, new: str) -> int:
+        """A page moved or renamed in the sidebar: its reading position, asks and highlights follow it, and those of
+        every page beneath it when ``old`` is a folder. How many rows moved. A page already known at the new path keeps
+        its own record, and the old one goes, so the move never leaves two."""
+        old, new = str(old).rstrip("/"), str(new).rstrip("/")
+        if not old or not new or old == new:
+            return 0
+        n = len(old)
+        match = "(col = ? OR substr(col, 1, ?) = ?)"
+        moved = 0
+        with self._lock:
+            for table, col in (("documents", "source"), ("conversations", "document_source"), ("highlights", "document_source")):
+                where = match.replace("col", col)
+                verb = "UPDATE OR IGNORE" if table == "documents" else "UPDATE"
+                cursor = self._db.execute(
+                    f"{verb} {table} SET {col} = ? || substr({col}, ?) WHERE {where}",
+                    (new, n + 1, old, n + 1, old + "/"),
+                )
+                moved += cursor.rowcount
+            self._db.execute(f"DELETE FROM documents WHERE {match.replace('col', 'source')}", (old, n + 1, old + "/"))
+            self._db.commit()
+        return moved
+
     def upsert_document(
         self,
         *,

@@ -31,6 +31,30 @@ class StorageTests(unittest.TestCase):
             self.assertEqual(reopened.highlights("guide.md"), [])
             reopened.close()
 
+    def test_a_move_carries_a_pages_position_asks_and_highlights_and_those_beneath_a_folder(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            store = Storage(Path(raw))
+            for source in ("/v/A/one.md", "/v/A/sub/two.md", "/v/AB/other.md"):
+                doc = store.upsert_document(source=source, title=source, kind="markdown", folder="/v")
+                store.update_position(source, 12.0)
+                store.add_highlight(id=source, source=source, selection="s", context="s", prefix="", suffix="", page=None)
+                store.start_conversation(
+                    request_id=source, document_id=doc, document_source=source, document_title=source, document_page=None,
+                    selection="s", context="", action="ask", question="q", folder="/v", provider="claude", model="m",
+                )
+            self.assertEqual(store.move_source("/v/A", "/v/Z"), 6)
+            self.assertEqual(store.document("/v/Z/sub/two.md")["scroll_y"], 12.0)
+            self.assertIsNone(store.document("/v/A/one.md"))
+            self.assertEqual(len(store.highlights("/v/Z/one.md")), 1)
+            self.assertEqual(store.document("/v/AB/other.md")["scroll_y"], 12.0)  # a sibling sharing the prefix stays
+            self.assertEqual(len(store.highlights("/v/AB/other.md")), 1)
+            # A page already known at the new path keeps its record; the old one goes rather than leaving two.
+            store.upsert_document(source="/v/new.md", title="New", kind="markdown", folder="/v")
+            store.move_source("/v/AB/other.md", "/v/new.md")
+            self.assertIsNone(store.document("/v/AB/other.md"))
+            self.assertEqual(store.document("/v/new.md")["title"], "New")
+            store.close()
+
     def test_first_start_adopts_the_ask_widget_database_and_leaves_it_in_place(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             root = Path(raw).resolve()  # Storage resolves /var → /private/var

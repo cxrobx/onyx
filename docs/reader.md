@@ -54,7 +54,8 @@ the note you were reading. ⌘E again shows the page, re-rendered, at the same p
   Obsidian's editor search does: it finds what you typed, markup included.
 - It edits `.md` and `.markdown` files that are UTF-8. Both the page and the
   editor read the same Markdown: CommonMark with tables, `~~strikethrough~~`,
-  `==highlights==`, tasks, and wikilinks and embeds.
+  `==highlights==`, tasks, wikilinks and embeds, callouts, `%%comments%%`,
+  `#tags` and bare URLs.
 
 ## Vault mode
 
@@ -75,6 +76,29 @@ Inside the vault the Markdown reader understands Obsidian's conventions:
 | `[[Missing]]` | A dotted span naming the note that does not exist. |
 | `![[image.png]]` | The image, preferring the vault's attachment folder. |
 | `[text](../Other.md)` | A reader link; relative and percent-encoded paths resolve. |
+| `> [!info] Title`, `> [!faq]-`, `> [!tip]+` | A callout in its type's colour and icon, as Obsidian draws it; `-` starts folded, `+` foldable but open. Callouts nest. |
+| `%%comment%%` | Nothing: hidden, inline or across lines (to the end of the note if never closed). |
+| `#tag`, `#nested/tag` | A tag pill, as in Properties. `#1` and `page#anchor` stay text. |
+| `https://example.com` written bare | A link (in any Markdown, not only the vault's). |
+| A single newline | A line break, as Obsidian draws a note while *Strict line breaks* is off (its default). Markdown outside the vault keeps CommonMark's soft break. |
+
+Not yet: math (`$…$`), footnotes, Mermaid diagrams, and raw HTML, which the
+reader escapes on purpose (Markdown is rendered without executing it).
+
+**Reorganise the vault in the sidebar**, as in Artifacts: drag a note or folder
+onto another folder, or onto the tree's empty space for the top; right-click for
+**Move To…** (a folder list you can type to filter), **Rename** (a note keeps its
+`.md`), and **New Folder** — an empty folder is listed, so it can take a drop.
+The same works in the other notes vaults, each within itself. Obsidian rewrites
+links only for a move made in Obsidian, so Onyx does it for its own: every
+`[text](relative/path.md)` and `![](image.png)` that would break is recomputed in
+the same style and encoding, and every `[[link]]` that would now resolve
+elsewhere is rewritten to the shortest form that resolves, heading and alias
+kept. Code is left alone. Each note is saved against the version read for the
+plan, so an edit made meanwhile is never overwritten; the toast names any note
+it could not update, and notes inside a linked folder (another tree's files) are
+reported rather than written. A page's asks, highlights and reading position
+follow it to its new path, in Artifacts too.
 
 Clicking a link swaps the reader pane and moves the tree highlight; the browser
 Back button walks the history. Press `/` to focus the filter box, Escape to clear
@@ -172,14 +196,16 @@ own look. See the plugin's README.
   stay out of the list.
 - **Reorganise in the sidebar.** Drag a row onto a folder (or onto the list's
   empty space for the top level); a shut folder held under the pointer springs
-  open. Right-click for **New Folder**, **Rename** (folders), **Pin to Top**, and
-  **Remove from Artifacts**. Moving a link moves only the link — its target stays
+  open. Right-click for **New Folder**, **Rename**, **Move To…**, **Pin to Top**,
+  and **Remove from Artifacts**. Renaming a page changes the name it is shown by,
+  not its `<title>` — the file is the link's target, somebody else's — and
+  **Use Page Title** puts the title back. Moving a link moves only the link — its target stays
   where it is — and a hand-made relative link that a move would re-aim is
   rewritten as an absolute one. Only what Artifacts owns can be handled: a link
   or a folder sitting in one of its own folders, never a page inside a linked
   folder (that page lives in another tree). Remove takes out a link or an empty
-  folder, never a target. A pin lives in the folder's hidden `.onyx.json` and
-  moves with its entry.
+  folder, never a target. A pin, and a page's own name, live in the folder's
+  hidden `.onyx.json` and move with their entry.
 - **A link whose target is gone stays listed, struck through, as *missing*.**
 - **+** links more in: HTML files or a folder through the native picker, or a
   pasted path or `file://` URL, into a project you choose; it can also create

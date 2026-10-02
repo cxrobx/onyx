@@ -25,7 +25,7 @@ The script runs inside the shell's ``<script>`` and leans on it: ``$``, ``esc``,
 (reassigned here), ``stage``, ``KIND``, ``VAULTS``, ``switchVault``, ``showHome``, ``empty``, ``home``, ``goHome``,
 ``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``navigate``, ``readerPage``
 and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs ``restoreTabs`` as
-it starts, and ``remapTabs`` when Artifacts moves a page.
+it starts, and ``remapTabs`` when the sidebar moves or renames a page.
 """
 
 from __future__ import annotations

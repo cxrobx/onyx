@@ -6,6 +6,7 @@ import io
 import json
 import math
 import os
+import shutil
 import re
 import socket
 import subprocess
@@ -1403,6 +1404,18 @@ class BrowserSmokeTests(unittest.TestCase):
             first = page.locator("#tree details[data-rel='Learnings'] > ul > li").first
             expect(first.locator(".pinned")).to_be_visible()
             expect(first).to_contain_text("Mastery Map")
+            # A page renames by the name it is shown by, never its file or target; Use Page Title puts the title back.
+            mastery.click(button="right")
+            page.wait_for_function("() => OnyxMenu.isOpen()")
+            page.locator(".onyx-menu button", has_text="Rename").click()
+            page.locator("#tree .name-edit").fill("The map")
+            page.keyboard.press("Enter")
+            expect(page.locator("#tree details[data-rel='Learnings'] a.file", has_text="The map")).to_be_visible()
+            self.assertTrue((vault / "Learnings" / "Mastery Map").is_symlink())
+            page.locator("#tree details[data-rel='Learnings'] a.file", has_text="The map").click(button="right")
+            page.wait_for_function("() => OnyxMenu.isOpen()")
+            page.locator(".onyx-menu button", has_text="Use Page Title").click()
+            expect(page.locator("#tree details[data-rel='Learnings'] a.file", has_text="Mastery Map")).to_be_visible()
 
             # Rename in place: Return keeps the name.
             learnings.click(button="right")
@@ -1426,6 +1439,91 @@ class BrowserSmokeTests(unittest.TestCase):
             browser.close()
 
         self.assertEqual(page_errors, [])
+
+    def test_notes_drag_move_to_rename_and_new_folder_keep_their_links(self) -> None:
+        # The notes vault reorganises as Artifacts does — drag a note onto a folder, Move To… from its menu, Rename in
+        # place, New Folder — and every link the change would break is rewritten in the notes that hold it. Both engines.
+        notes = self.root / "CX"
+        shots = os.environ.get("ONYX_SMOKE_SHOTS")
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    if notes.exists():
+                        shutil.rmtree(notes)
+                    for folder in ("Projects", "Archive/Old", "Areas"):
+                        (notes / folder).mkdir(parents=True)
+                    (notes / "Projects" / "Plan.md").write_text("# Plan\n\n[goals](../Areas/Goals.md)\n", encoding="utf-8")
+                    (notes / "Areas" / "Goals.md").write_text("[the plan](../Projects/Plan.md) and [[Projects/Plan|plan]]\n", encoding="utf-8")
+                    self.app.state.storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
+                    self.app.state.vault.invalidate()
+
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page_errors: list[str] = []
+                    page.on("pageerror", lambda error: page_errors.append(str(error)))
+                    page.goto(f"{self.base_url}/vault?vault=notes", wait_until="networkidle")
+                    archive = page.locator("#tree details[data-rel='Archive'] > summary")
+                    expect(archive).to_be_visible()
+                    plan = page.locator(f"#tree a.file[data-entry='{notes / 'Projects' / 'Plan.md'}']")
+                    if not plan.is_visible():
+                        page.locator("#tree details[data-rel='Projects'] > summary").click()
+                    plan.click()
+                    page.wait_for_function("() => (document.getElementById('reader').contentDocument || {}).title === 'Plan'")
+
+                    # Drag: the note moves, its own link and the links to it are rewritten, the open page follows.
+                    plan.drag_to(archive)
+                    expect(page.locator(".onyx-toast")).to_contain_text("updated 2 links in 1 note")
+                    moved = notes / "Archive" / "Plan.md"
+                    self.assertTrue(moved.is_file())
+                    self.assertIn("[goals](../Areas/Goals.md)", moved.read_text(encoding="utf-8"))
+                    goals = notes / "Areas" / "Goals.md"
+                    self.assertEqual(goals.read_text(encoding="utf-8"), "[the plan](../Archive/Plan.md) and [[Plan|plan]]\n")
+                    page.wait_for_function(
+                        "p => decodeURIComponent(document.getElementById('reader').src).includes(p)", arg=str(moved))
+
+                    # Move To…: a filterable list of the vault's folders.
+                    row = page.locator(f"#tree a.file[data-entry='{moved}']")
+                    expect(row).to_be_visible()
+                    row.click(button="right")
+                    page.wait_for_function("() => OnyxMenu.isOpen()")
+                    page.locator(".onyx-menu button", has_text="Move To").click()
+                    page.locator(".move-filter").fill("old")
+                    expect(page.locator(".move-list button")).to_have_count(1)
+                    if shots:
+                        page.screenshot(path=f"{shots}/move-to-{engine}.png")
+                    page.keyboard.press("Enter")
+                    deeper = notes / "Archive" / "Old" / "Plan.md"
+                    expect(page.locator(f"#tree a.file[data-entry='{deeper}']")).to_be_visible()
+                    self.assertEqual(goals.read_text(encoding="utf-8"), "[the plan](../Archive/Old/Plan.md) and [[Plan|plan]]\n")
+
+                    # Rename in place: the note keeps its .md, and a name link follows the new name.
+                    goals.write_text("[[Plan]]\n", encoding="utf-8")
+                    row = page.locator(f"#tree a.file[data-entry='{deeper}']")
+                    row.click(button="right")
+                    page.wait_for_function("() => OnyxMenu.isOpen()")
+                    page.locator(".onyx-menu button", has_text="Rename").click()
+                    page.locator("#tree .name-edit").fill("Roadmap")
+                    page.keyboard.press("Enter")
+                    renamed = notes / "Archive" / "Old" / "Roadmap.md"
+                    expect(page.locator(f"#tree a.file[data-entry='{renamed}']")).to_be_visible()
+                    self.assertEqual(goals.read_text(encoding="utf-8"), "[[Roadmap]]\n")
+
+                    # New Folder from the tree's empty space; it shows while empty, so it can take a drop.
+                    box = page.locator("#tree").bounding_box()
+                    page.mouse.click(box["x"] + 100, box["y"] + box["height"] - 15, button="right")
+                    page.wait_for_function("() => OnyxMenu.isOpen()")
+                    page.locator(".onyx-menu button", has_text="New Folder").click()
+                    page.locator("#tree .name-edit").fill("Resources")
+                    page.keyboard.press("Enter")
+                    resources = page.locator("#tree details[data-rel='Resources'] > summary")
+                    expect(resources).to_be_visible()
+                    goals_row = page.locator(f"#tree a.file[data-entry='{goals}']")
+                    if not goals_row.is_visible():
+                        page.locator("#tree details[data-rel='Areas'] > summary").click()  # Notes' folders start shut
+                    goals_row.drag_to(resources)
+                    expect(page.locator(f"#tree a.file[data-entry='{notes / 'Resources' / 'Goals.md'}']")).to_be_visible()
+                    self.assertEqual(page_errors, [])
+                    browser.close()
 
     def test_vault_sidebar_wears_the_obsidian_explorer_and_falls_back_live(self) -> None:
         notes = self.root / "CX"
@@ -1908,7 +2006,7 @@ class BrowserSmokeTests(unittest.TestCase):
 
                     # Folders: a linked one offers both sides, the vault's own folder only itself. Both sit in the
                     # vault's own top level, so both rename, pin and come out; only the vault's own takes a new folder.
-                    owned = ["Rename", "Pin to Top", "Remove from Artifacts"]
+                    owned = ["Rename", "Move To…", "Pin to Top", "Remove from Artifacts"]
                     page.locator("#tree summary", has_text="Architect").click(button="right")
                     expect(menu).to_have_attribute("aria-label", "Folder actions")
                     expect(items).to_have_text(["Reveal in Finder", "Reveal Link in Finder", *owned])
@@ -1974,7 +2072,7 @@ class BrowserSmokeTests(unittest.TestCase):
             # The sidebar title is usable even when the note tree fills the scroll area.
             page.locator(".brand-name").click(button="right")
             expect(menu).to_have_attribute("aria-label", "Vault actions")
-            expect(items).to_have_text(["Reveal Current Note", "Collapse All"])
+            expect(items).to_have_text(["Reveal Current Note", "Collapse All", "New Folder"])
             page.keyboard.press("Escape")
 
             def empty_space() -> None:
@@ -1983,7 +2081,7 @@ class BrowserSmokeTests(unittest.TestCase):
 
             empty_space()
             expect(menu).to_have_attribute("aria-label", "Vault actions")
-            expect(items).to_have_text(["Reveal Current Note", "Collapse All"])
+            expect(items).to_have_text(["Reveal Current Note", "Collapse All", "New Folder"])
             menu.get_by_role("menuitem", name="Collapse All").click()
             expect(menu).to_be_hidden()
             expect(page.locator("#tree details[open]")).to_have_count(0)
@@ -4619,7 +4717,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     # Renaming the folder: the tabs behind now read from the new path, and one shown loads from it.
                     page.evaluate(
                         """async () => { const d = await postJSON('/api/vault/html/rename', {path: rootOf('html') + '/Pages', name: 'Docs'});
-                        remap(d.from, d.path); await loadTree() }"""
+                        remap('html', d.from, d.path); await loadTree() }"""
                     )
                     try:
                         self.assertTrue((artifacts / "Docs" / "one.html").exists())

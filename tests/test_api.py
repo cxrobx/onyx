@@ -1105,6 +1105,91 @@ class HtmlVaultApiTests(unittest.TestCase):
         self.assertEqual(self.post("/api/vault/html/remove", {"path": str(study)}).json()["removed"], "folder")
         self.assertFalse(study.exists())
 
+    def test_a_page_renamed_in_artifacts_keeps_its_file_and_its_target_and_goes_back_to_its_title(self) -> None:
+        topic_link = self.vault / "Architect"
+        page = self.post("/api/vault/html/name", {"path": str(topic_link), "name": "  The architect  "})
+        self.assertEqual(page.status_code, 200)
+        node = next(c for c in self.client.get("/api/vault/tree", params={"vault": "html"}).json()["tree"]["children"]
+                    if c["name"] == "Architect")
+        self.assertEqual(node["name"], "Architect")  # the folder link is untouched on disk
+        self.assertEqual(json.loads((self.vault / ".onyx.json").read_text())["names"], {"Architect": "The architect"})
+        # A display name follows its entry through a move, and an empty one puts the title back.
+        self.post("/api/vault/html/move", {"path": str(topic_link), "dest": "Mine"})
+        self.assertEqual(json.loads((self.vault / "Mine" / ".onyx.json").read_text())["names"], {"Architect": "The architect"})
+        self.assertFalse((self.vault / ".onyx.json").exists())
+        self.post("/api/vault/html/name", {"path": str(self.vault / "Mine" / "Architect"), "name": ""})
+        self.assertFalse((self.vault / "Mine" / ".onyx.json").exists())
+        self.assertEqual(os.readlink(self.vault / "Mine" / "Architect"), str(self.topic))
+
+    def test_notes_reorganise_inside_their_vault_and_carry_their_links_asks_and_place(self) -> None:
+        notes = self.base / "Notes"
+        (notes / "Projects").mkdir(parents=True)
+        (notes / "Archive").mkdir()
+        plan = notes / "Projects" / "Plan.md"
+        plan.write_text("# Plan\n", encoding="utf-8")
+        index = notes / "Index.md"
+        index.write_text("[plan](Projects/Plan.md) [[Projects/Plan]]\n", encoding="utf-8")
+        outside = self.base / "elsewhere"
+        outside.mkdir()
+        (notes / "Linked").symlink_to(outside, target_is_directory=True)
+        self.post("/api/settings", {"settings": {"vault_root": str(notes)}})
+        storage = self.app.state.storage
+        storage.upsert_document(source=str(plan), title="Plan", kind="markdown", folder=str(notes))
+        storage.update_position(str(plan), 420.0)
+
+        # Every row the vault owns says what moving it moves; the token and the origin guard every route.
+        tree = self.client.get("/api/vault/tree", params={"vault": "notes"}).json()["tree"]
+        self.assertEqual(next(c for c in tree["children"] if c["name"] == "Index.md")["entry"], str(index))
+        move = {"path": str(plan), "dest": "Archive"}
+        self.assertEqual(self.post("/api/vault/notes/move", move, token=False).status_code, 403)
+        foreign = self.client.post("/api/vault/notes/move", json={"token": self.config.token, **move},
+                                   headers={"origin": "https://attacker.example"})
+        self.assertEqual(foreign.status_code, 403)
+        self.assertEqual(self.post("/api/vault/v-nowhere/move", move).status_code, 400)
+        # Pins, links and Remove are Artifacts' own.
+        for route in ("pin", "remove", "name"):
+            self.assertEqual(self.post(f"/api/vault/notes/{route}", {"path": str(plan)}).status_code, 400)
+
+        moved = self.post("/api/vault/notes/move", move).json()
+        self.assertEqual((moved["from"], moved["path"]), (str(plan), str(notes / "Archive" / "Plan.md")))
+        self.assertEqual(moved["relinked"]["updated"], ["Index.md"])
+        self.assertEqual(index.read_text(encoding="utf-8"), "[plan](Archive/Plan.md) [[Plan]]\n")
+        # Its record in Onyx follows it: Recents name the new path, and it opens where it was left.
+        self.assertIsNone(storage.document(str(plan)))
+        self.assertEqual(storage.document(str(notes / "Archive" / "Plan.md"))["scroll_y"], 420.0)
+
+        # Nothing goes into, or comes out of, a linked folder: that is another tree's.
+        into = self.post("/api/vault/notes/move", {"path": str(index), "dest": "Linked"})
+        self.assertIn("linked folder", into.json()["error"])
+        self.assertTrue(index.is_file())
+        (outside / "Theirs.md").write_text("theirs\n", encoding="utf-8")
+        out = self.post("/api/vault/notes/move", {"path": str(notes / "Linked" / "Theirs.md"), "dest": ""})
+        self.assertIn("inside a linked folder", out.json()["error"])
+        escape = self.post("/api/vault/notes/move", {"path": str(index), "dest": "../.."})
+        self.assertEqual(escape.status_code, 400)
+        self.assertTrue(index.is_file())
+
+        # Rename keeps the note a note; New Folder makes one Notes lists while it is still empty.
+        renamed = self.post("/api/vault/notes/rename", {"path": str(notes / "Archive" / "Plan.md"), "name": "Roadmap"}).json()
+        self.assertEqual(renamed["path"], str(notes / "Archive" / "Roadmap.md"))
+        self.assertEqual(index.read_text(encoding="utf-8"), "[plan](Archive/Roadmap.md) [[Roadmap]]\n")
+        self.post("/api/vault/notes/folder", {"parent": "", "name": "Resources"})
+        tree = self.client.get("/api/vault/tree", params={"vault": "notes"}).json()["tree"]
+        resources = next(c for c in tree["children"] if c["name"] == "Resources")
+        self.assertEqual((resources["rel"], resources["linked"], resources["children"]), ("Resources", False, []))
+
+        # Another notes vault (Settings ▸ Vaults) reorganises the same way, under its own key, and only inside itself.
+        work = self.base / "Work Vault"
+        (work / "Inbox").mkdir(parents=True)
+        (work / "Todo.md").write_text("todo\n", encoding="utf-8")
+        self.post("/api/settings", {"settings": {"extra_vault_roots": [str(work)]}})
+        key = self.client.get("/api/vaults").json()["vaults"][1]["key"]
+        self.assertEqual(key, "v-work-vault")
+        self.assertEqual(self.post(f"/api/vault/{key}/move", {"path": str(work / "Todo.md"), "dest": "Inbox"}).status_code, 200)
+        self.assertTrue((work / "Inbox" / "Todo.md").is_file())
+        across = self.post(f"/api/vault/{key}/move", {"path": str(index), "dest": ""})
+        self.assertIn("not in Work Vault", across.json()["error"])
+
 
 class PluginOriginTests(unittest.TestCase):
     """The Obsidian plugin talks to the same API from app://obsidian.md."""

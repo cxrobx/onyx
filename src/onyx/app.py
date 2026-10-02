@@ -27,6 +27,7 @@ import logging
 import re
 import secrets
 import sys
+import threading
 import time
 import urllib.parse
 import uuid
@@ -46,7 +47,7 @@ from .prompts import append_system_for, build_handoff_prompt, build_user_prompt
 from .providers import find_claude, find_codex, provider_catalogs, provider_status
 from .storage import Storage
 from .vault_ui import vault_page
-from . import first_run, handoff, markdown_theme, search, sidebar_theme, vault, vault_look, vault_mode, viewer
+from . import first_run, handoff, markdown_theme, relink, search, sidebar_theme, vault, vault_look, vault_mode, viewer
 from . import __version__
 
 logger = logging.getLogger("onyx.app")
@@ -1448,8 +1449,15 @@ def create_app(config: AppConfig) -> FastAPI:
         await asyncio.to_thread(vault.reveal_in_finder, target)
         return JSONResponse({"ok": True, "revealed": target}, headers=cors(request.headers.get("origin")))
 
-    async def _html_vault_body(request: Request) -> tuple[dict, Path] | JSONResponse:
-        """Shared guard for the two Artifacts write routes: token, JSON, root."""
+    def _vault_keyed(key: str) -> _Vault | None:
+        """The vault a reorganising route names, exactly: "html", "notes", or another notes vault's key."""
+        if key == "html":
+            root = _vault_root(app, "html")
+            return _Vault("html", "html", root, "Artifacts") if root is not None else None
+        return next((one for one in _notes_vaults(app) if one.key == key), None)
+
+    async def _vault_body(request: Request, key: str) -> tuple[dict, _Vault] | JSONResponse:
+        """Shared guard for the vault write routes: token, JSON, and the vault the route names."""
         if denied := api_forbidden(request):
             return denied
         try:
@@ -1460,24 +1468,33 @@ def create_app(config: AppConfig) -> FastAPI:
             return JSONResponse({"ok": False, "error": "invalid JSON object"}, status_code=400)
         if body.get("token") != config.token:
             return JSONResponse({"ok": False, "error": "invalid token"}, status_code=403)
-        root = _vault_root(app, "html")
-        if root is None:
-            return JSONResponse({"ok": False, "error": _vault_missing_error(app, "html")}, status_code=400)
-        return body, root
+        one = _vault_keyed(key)
+        if one is None:
+            error = _vault_missing_error(app, key) if key in ("html", "notes") else "No such vault."
+            return JSONResponse({"ok": False, "error": error}, status_code=400)
+        return body, one
 
-    @app.post("/api/vault/html/folder")
-    async def html_vault_folder_api(request: Request):
-        guarded = await _html_vault_body(request)
+    async def _html_vault_body(request: Request) -> tuple[dict, Path] | JSONResponse:
+        """The link route's guard: only Artifacts holds links to pages elsewhere."""
+        guarded = await _vault_body(request, "html")
         if isinstance(guarded, JSONResponse):
             return guarded
-        body, root = guarded
+        body, one = guarded
+        return body, one.root
+
+    @app.post("/api/vault/{key}/folder")
+    async def vault_folder_api(key: str, request: Request):
+        guarded = await _vault_body(request, key)
+        if isinstance(guarded, JSONResponse):
+            return guarded
+        body, one = guarded
         try:
-            folder = vault.create_folder(root, str(body.get("parent") or ""), str(body.get("name") or ""))
+            folder = vault.create_folder(one.root, str(body.get("parent") or ""), str(body.get("name") or ""), one.label)
         except (OSError, ValueError) as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         app.state.vault.invalidate()
         return JSONResponse(
-            {"ok": True, "path": str(folder), "rel": folder.relative_to(root).as_posix()},
+            {"ok": True, "path": str(folder), "rel": folder.relative_to(one.root).as_posix()},
             headers=cors(request.headers.get("origin")),
         )
 
@@ -1521,50 +1538,91 @@ def create_app(config: AppConfig) -> FastAPI:
             headers=cors(request.headers.get("origin")),
         )
 
-    # The sidebar's reorganising: drag a row onto a folder, and the row menu's
-    # Rename, Pin to Top and Remove. Each names an entry the tree marked as the
-    # vault's own; vault.owned_entry refuses anything else.
-    async def _html_vault_edit(request: Request, edit) -> JSONResponse:
-        guarded = await _html_vault_body(request)
+    # The sidebar's reorganising: drag a row onto a folder, and the row menu's Rename, Move To and New Folder, and in
+    # Artifacts Pin to Top and Remove. Each names an entry the tree marked as the vault's own; vault.owned_entry refuses
+    # anything else. One at a time: a notes move plans its links, moves, then writes them, and a second move
+    # interleaved with that would plan against a vault about to change.
+    reorganising = threading.Lock()
+
+    def _relocate(one: _Vault, path: Path, plan_it, do_it) -> dict:
+        """Move or rename ``path`` in ``one``: in a notes vault, with every link the change would break rewritten
+        (relink.py). Its asks, highlights and reading position follow it either way."""
+        with reorganising:
+            planned = relink.Plan()
+            if one.kind != "html":
+                entry, target = plan_it()
+                if target != entry:
+                    app.state.vault.invalidate()  # the plan reads every note as it is now
+                    index = app.state.vault.get(one.root, one.kind)
+                    planned = relink.plan(index, relink.file_moves(index, entry, target))
+            moved = do_it()
+            result: dict = {"from": str(path), "path": str(moved)}
+            if one.kind != "html":
+                result["relinked"] = relink.apply(one.root, planned)
+            if moved != path:
+                app.state.storage.move_source(str(path), str(moved))
+            return result
+
+    async def _vault_edit(request: Request, key: str, edit, *, html_only: bool = False) -> JSONResponse:
+        guarded = await _vault_body(request, key)
         if isinstance(guarded, JSONResponse):
             return guarded
-        body, root = guarded
+        body, one = guarded
+        if html_only and one.kind != "html":
+            return JSONResponse({"ok": False, "error": "Only Artifacts has that."}, status_code=400)
         path = vault.normalize(str(body.get("path") or ""))
         try:
-            result = await asyncio.to_thread(edit, body, root, path)
+            result = await asyncio.to_thread(edit, body, one, path)
         except (OSError, ValueError) as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         app.state.vault.invalidate()
         return JSONResponse({"ok": True, **result}, headers=cors(request.headers.get("origin")))
 
-    @app.post("/api/vault/html/move")
-    async def html_vault_move_api(request: Request):
-        def move(body: dict, root: Path, path: Path) -> dict:
-            return {"from": str(path), "path": str(vault.move_entry(root, path, str(body.get("dest") or "")))}
+    @app.post("/api/vault/{key}/move")
+    async def vault_move_api(key: str, request: Request):
+        def move(body: dict, one: _Vault, path: Path) -> dict:
+            dest = str(body.get("dest") or "")
+            return _relocate(
+                one, path,
+                lambda: vault.plan_move(one.root, path, dest, one.label),
+                lambda: vault.move_entry(one.root, path, dest, one.label),
+            )
 
-        return await _html_vault_edit(request, move)
+        return await _vault_edit(request, key, move)
 
-    @app.post("/api/vault/html/rename")
-    async def html_vault_rename_api(request: Request):
-        def rename(body: dict, root: Path, path: Path) -> dict:
-            return {"from": str(path), "path": str(vault.rename_entry(root, path, str(body.get("name") or "")))}
+    @app.post("/api/vault/{key}/rename")
+    async def vault_rename_api(key: str, request: Request):
+        def rename(body: dict, one: _Vault, path: Path) -> dict:
+            name = str(body.get("name") or "")
+            return _relocate(
+                one, path,
+                lambda: vault.plan_rename(one.root, path, name, one.label),
+                lambda: vault.rename_entry(one.root, path, name, one.label),
+            )
 
-        return await _html_vault_edit(request, rename)
+        return await _vault_edit(request, key, rename)
 
-    @app.post("/api/vault/html/pin")
-    async def html_vault_pin_api(request: Request):
-        def pin(body: dict, root: Path, path: Path) -> dict:
+    @app.post("/api/vault/{key}/name")
+    async def vault_name_api(key: str, request: Request):
+        def name(body: dict, one: _Vault, path: Path) -> dict:
+            return {"path": str(vault.set_display_name(one.root, path, str(body.get("name") or "")))}
+
+        return await _vault_edit(request, key, name, html_only=True)
+
+    @app.post("/api/vault/{key}/pin")
+    async def vault_pin_api(key: str, request: Request):
+        def pin(body: dict, one: _Vault, path: Path) -> dict:
             pinned = body.get("pinned") is not False
-            return {"path": str(vault.set_pinned(root, path, pinned)), "pinned": pinned}
+            return {"path": str(vault.set_pinned(one.root, path, pinned)), "pinned": pinned}
 
-        return await _html_vault_edit(request, pin)
+        return await _vault_edit(request, key, pin, html_only=True)
 
-    @app.post("/api/vault/html/remove")
-    async def html_vault_remove_api(request: Request):
-        def remove(body: dict, root: Path, path: Path) -> dict:
-            return {"path": str(path), "removed": vault.remove_entry(root, path)}
+    @app.post("/api/vault/{key}/remove")
+    async def vault_remove_api(key: str, request: Request):
+        def remove(body: dict, one: _Vault, path: Path) -> dict:
+            return {"path": str(path), "removed": vault.remove_entry(one.root, path)}
 
-        return await _html_vault_edit(request, remove)
+        return await _vault_edit(request, key, remove, html_only=True)
 
     @app.get("/api/settings")
     async def settings_api(request: Request):
