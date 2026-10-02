@@ -189,6 +189,10 @@ opened, and re-sending the 1.7 MB index for that would be waste:
   the folder tree.
 - The phone may merge `recent` with its own record of pages it opened (it never
   writes back), newest first.
+- Remove from Recents on the Mac drops the page from `recent` and the thread from
+  `chats`. The phone has its own Remove from Recents, which hides a row on the
+  phone only, since it never writes back. A row hidden there returns when its
+  `opened_at` or `updated_at` moves past the time it showed when it was removed.
 - The library is uploaded after the index, so everything it names is already
   there; the phone ignores any id the index doesn't list.
 
