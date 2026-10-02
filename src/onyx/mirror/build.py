@@ -442,16 +442,25 @@ def build_mirror(
 def markdown_theme_css(storage: Any, notes_root: Path | None) -> str | None:
     """The CSS ``/view`` injects into markdown, text and PDF pages for this vault, worked out without a running app.
 
-    None when there is none to inject: no notes vault, no reading theme stored for it, or "Match Obsidian" is off."""
+    None when there is none to inject: no notes vault, no reading theme stored for it, or "Match Obsidian" is off.
+    With both of the vault's colour modes measured, it is both, each under its ``prefers-color-scheme``: the phone
+    holds its web views to the mode its Appearance setting picks, so a page follows that, where ``/view`` on the Mac
+    gets the one mode its Color theme picks."""
     if notes_root is None:
         return None
     if not storage.settings().get("markdown_follow_obsidian", True):
         return None
-    snapshot = storage.markdown_theme(vault.normalize(Path(notes_root).expanduser()))
-    if not snapshot:
-        return None
+    root = vault.normalize(Path(notes_root).expanduser())
+    light, dark = storage.markdown_theme(root, "light"), storage.markdown_theme(root, "dark")
     try:
-        css = markdown_theme.stylesheet(snapshot)
+        if light and dark:
+            css = "\n".join(f"@media (prefers-color-scheme: {mode}) {{\n{markdown_theme.stylesheet(snapshot)}\n}}"
+                            for mode, snapshot in (("light", light), ("dark", dark)))
+        else:
+            snapshot = storage.markdown_theme(root)
+            if not snapshot:
+                return None
+            css = markdown_theme.stylesheet(snapshot)
     except ValueError:
         # A stored theme that no longer validates. The pages publish unthemed, and pick the theme up once it is fixed,
         # since a theme change is a change to their bytes.

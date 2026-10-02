@@ -45,7 +45,7 @@ from .prompts import append_system_for, build_handoff_prompt, build_user_prompt
 from .providers import find_claude, find_codex, provider_catalogs, provider_status
 from .storage import Storage
 from .vault_ui import vault_page
-from . import first_run, handoff, markdown_theme, search, sidebar_theme, vault, vault_look, viewer
+from . import first_run, handoff, markdown_theme, search, sidebar_theme, vault, vault_look, vault_mode, viewer
 from . import __version__
 
 logger = logging.getLogger("onyx.app")
@@ -1521,7 +1521,7 @@ def create_app(config: AppConfig) -> FastAPI:
     def current_markdown_theme() -> dict:
         settings = app.state.storage.settings(model_default=config.model)
         root = _vault_root(app)
-        snapshot = app.state.storage.markdown_theme(root) if root else None
+        snapshot = vault_mode.snapshots(app.state.storage, root, settings.get("vault_mode"))[0] if root else None
         enabled = bool(settings.get("markdown_follow_obsidian", True))
         css = markdown_theme.stylesheet(snapshot) if enabled else ""
         return {"ok": True, "enabled": enabled, "available": snapshot is not None,
@@ -1538,7 +1538,8 @@ def create_app(config: AppConfig) -> FastAPI:
     async def receive_theme(request: Request, validate, save, too_large: str, outcome: dict | None = None):
         """The plugin's POST of an appearance snapshot: bounded, token-checked, validated, stored per vault.
 
-        ``outcome`` (when given) keeps the last attempt, so a refused sync is visible in the status line rather
+        ``other`` (optional) is the same snapshot measured in the vault's other colour mode (vault_mode); it is
+        validated as strictly, and must be the other mode. ``outcome`` (when given) keeps the last attempt, so a refused sync is visible in the status line rather
         than indistinguishable from Obsidian simply being closed.
         """
         response = await _receive_theme(request, validate, save, too_large)
@@ -1556,7 +1557,7 @@ def create_app(config: AppConfig) -> FastAPI:
         raw = bytearray()
         async for chunk in request.stream():
             raw.extend(chunk)
-            if len(raw) > markdown_theme.MAX_SNAPSHOT_BYTES + 8192:
+            if len(raw) > 2 * markdown_theme.MAX_SNAPSHOT_BYTES + 8192:
                 return JSONResponse({"ok": False, "error": too_large}, status_code=413)
         try:
             body = json.loads(raw)
@@ -1574,9 +1575,12 @@ def create_app(config: AppConfig) -> FastAPI:
             if not root.is_absolute() or not root.is_dir():
                 raise ValueError("Vault folder does not exist.")
             snapshot = validate(body.get("snapshot"))
+            other = validate(body["other"]) if body.get("other") is not None else None
+            if other is not None and other["mode"] == snapshot["mode"]:
+                raise ValueError("The other snapshot must be the vault's other colour mode.")
         except (OSError, ValueError, RuntimeError) as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
-        save(root, snapshot)
+        save(root, snapshot, other)
         return JSONResponse({"ok": True}, headers=cors(request.headers.get("origin")))
 
     @app.post("/api/markdown-theme")
@@ -1590,7 +1594,7 @@ def create_app(config: AppConfig) -> FastAPI:
     def current_sidebar_theme() -> dict:
         settings = app.state.storage.settings(model_default=config.model)
         root = _vault_root(app)
-        snapshot = app.state.storage.sidebar_theme(root) if root else None
+        snapshot = vault_mode.snapshots(app.state.storage, root, settings.get("vault_mode"))[1] if root else None
         enabled = bool(settings.get("sidebar_follow_obsidian", True))
         css = sidebar_theme.stylesheet(snapshot) if enabled else ""
         folders = sidebar_theme.folder_tints(snapshot) if css else []
@@ -1616,18 +1620,19 @@ def create_app(config: AppConfig) -> FastAPI:
         )
 
     # The whole app in the vault's colours (vault_look): the palette the two snapshots give, while either
-    # vault-appearance setting is on — Settings shows them as one switch, "Match vault appearance".
+    # vault-appearance setting is on — Settings shows them as one switch, "Match vault appearance". Which of the
+    # vault's colour modes is Settings' Color theme while it is on (vault_mode); `modes` is what the plugin has
+    # measured, so Settings can say when the one asked for hasn't arrived.
     def current_vault_look() -> dict:
         settings = app.state.storage.settings(model_default=config.model)
         root = _vault_root(app)
         enabled = bool(settings.get("markdown_follow_obsidian", True) or settings.get("sidebar_follow_obsidian", True))
-        look = (
-            vault_look.palette(app.state.storage.markdown_theme(root), app.state.storage.sidebar_theme(root))
-            if root else None
-        )
+        look = vault_look.palette(*vault_mode.snapshots(app.state.storage, root, settings.get("vault_mode"))) if root else None
         worn = look if enabled else None
         return {"ok": True, "enabled": enabled, "page_enabled": bool(settings.get("html_follow_page", True)),
-                "available": look is not None,
+                "available": look is not None, "choice": settings.get("vault_mode") or "obsidian",
+                "wanted": vault_mode.wanted(settings.get("vault_mode")),
+                "modes": vault_mode.available(app.state.storage, root) if root else [],
                 "mode": worn["mode"] if worn else None, "base": worn["base"] if worn else None,
                 "css": vault_look.stylesheet(worn), "reader_css": vault_look.reader_stylesheet(worn),
                 "revision": vault_look.revision(worn)}

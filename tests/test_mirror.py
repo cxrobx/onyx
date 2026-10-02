@@ -1136,19 +1136,29 @@ SIDEBAR_SNAPSHOT = {"mode": "light", "styles": {"pane": {"background-color": "rg
 
 
 class FakeThemeStorage:
-    """The three Storage calls look_for makes, by their real names."""
+    """The three Storage calls look_for makes, by their real names: with a ``mode``, the snapshot of that colour
+    mode (Obsidian's own, or the other one the plugin measured), as Storage._theme answers."""
 
-    def __init__(self, settings: dict, markdown=MARKDOWN_SNAPSHOT, sidebar=SIDEBAR_SNAPSHOT) -> None:
-        self._settings, self._markdown, self._sidebar = settings, markdown, sidebar
+    def __init__(self, settings: dict, markdown=MARKDOWN_SNAPSHOT, sidebar=SIDEBAR_SNAPSHOT,
+                 other_markdown=None, other_sidebar=None) -> None:
+        self._settings = settings
+        self._markdown, self._sidebar = (markdown, other_markdown), (sidebar, other_sidebar)
 
     def settings(self, **_) -> dict:
         return dict(self._settings)
 
-    def markdown_theme(self, root):
-        return self._markdown
+    @staticmethod
+    def _pick(pair, mode):
+        current, other = pair
+        if mode is None or (current or {}).get("mode") == mode:
+            return current
+        return other if (other or {}).get("mode") == mode else None
 
-    def sidebar_theme(self, root):
-        return self._sidebar
+    def markdown_theme(self, root, mode=None):
+        return self._pick(self._markdown, mode)
+
+    def sidebar_theme(self, root, mode=None):
+        return self._pick(self._sidebar, mode)
 
 
 class LookTests(MirrorTestCase):
@@ -1175,11 +1185,27 @@ class LookTests(MirrorTestCase):
 
         off = service.look_for(FakeThemeStorage({"markdown_follow_obsidian": False, "sidebar_follow_obsidian": False,
                                                  "html_follow_page": False, "appearance_theme": "bogus"}), roots)
-        self.assertEqual(off, {"vault": None, "follow_page": False, "appearance": "system"})
+        self.assertEqual(off, {"vault": None, "vaults": None, "follow_page": False, "appearance": "system"})
         # Either switch keeps it on, as current_vault_look reads them.
         one = service.look_for(FakeThemeStorage({"markdown_follow_obsidian": False}), roots)
         self.assertIsNotNone(one["vault"])
         self.assertIsNone(service.look_for(FakeThemeStorage({}), {})["vault"])  # no notes vault, nothing to wear
+
+    def test_the_phone_gets_each_mode_the_plugin_measured_and_the_one_the_mac_wears(self) -> None:
+        from onyx import vault_look
+
+        roots = {"Notes": self.base}
+        dark_md = {"mode": "dark", "styles": {"content": {"background-color": "rgb(0, 43, 54)", "color": "rgb(238, 232, 213)"}}}
+        dark_sb = {"mode": "dark", "styles": {"pane": {"background-color": "rgb(7, 54, 66)", "color": "rgb(238, 232, 213)"}}}
+        light = vault_look.palette(MARKDOWN_SNAPSHOT, SIDEBAR_SNAPSHOT)
+        dark = vault_look.palette(dark_md, dark_sb)
+        both = service.look_for(FakeThemeStorage({}, other_markdown=dark_md, other_sidebar=dark_sb), roots)
+        self.assertEqual(both["vaults"], {"light": light, "dark": dark})
+        self.assertEqual(both["vault"], light, "the Mac's Color theme: Same as Obsidian")
+        chosen = service.look_for(FakeThemeStorage({"vault_mode": "dark"}, other_markdown=dark_md, other_sidebar=dark_sb), roots)
+        self.assertEqual((chosen["vault"], chosen["vaults"]["light"]), (dark, light))
+        # An older plugin: only Obsidian's own mode, and the other is null rather than a guess.
+        self.assertEqual(service.look_for(FakeThemeStorage({}), roots)["vaults"], {"light": light, "dark": None})
 
     @needs_extra
     def test_a_theme_change_republishes_only_the_index(self) -> None:

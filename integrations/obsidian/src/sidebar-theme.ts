@@ -1,10 +1,18 @@
 import { TFolder, type App } from "obsidian";
 
+import { inOtherMode } from "./color-mode";
+
 /** What Onyx's vault sidebar needs to look like this vault's file explorer (see sidebar_theme.py). */
 export interface SidebarThemeSnapshot {
   mode: "light" | "dark";
   styles: Record<string, Record<string, string>>;
   folders: { name: string; color: string; guide?: string; hover?: string }[];
+}
+
+/** This mode's snapshot, and the other mode's when it was measured this time. */
+export interface SidebarThemeCapture {
+  snapshot: SidebarThemeSnapshot;
+  other?: SidebarThemeSnapshot;
 }
 
 const TYPE = ["color", "font-family", "font-size", "font-weight", "font-style", "letter-spacing", "line-height", "text-transform"];
@@ -65,8 +73,9 @@ function row(parent: HTMLElement, kind: "folder" | "file", path: string, extra =
  * The copy has Obsidian's own shape (see list/row), and sits inside the real explorer pane when one is open, so the
  * pane's background and every ancestor-scoped rule (a border layout's cream pane inside a black frame) resolve as
  * they do there. With no explorer open, it gets the same chain of workspace wrappers in the left sidebar.
+ * `measureOther` measures the other colour mode as well (color-mode.ts).
  */
-export function captureSidebarTheme(app: App): SidebarThemeSnapshot {
+export function captureSidebarTheme(app: App, measureOther = false): SidebarThemeCapture {
   let mount = document.querySelector<HTMLElement>(LIVE);
   let scaffold: HTMLElement | null = null;
   if (!mount) {
@@ -86,56 +95,63 @@ export function captureSidebarTheme(app: App): SidebarThemeSnapshot {
   row(top, "file", "Onyx active.md", "onyx-sample-active").querySelector(".nav-file-title")?.addClass("is-active");
   container.createDiv({ cls: "search-input-container onyx-sample-search" }).createEl("input", { type: "search" });
   try {
-    const styles: SidebarThemeSnapshot["styles"] = {};
-    for (const [key, [selector, properties]] of Object.entries(ELEMENTS)) {
-      const element = selector === ":scope" ? container : container.querySelector<HTMLElement>(selector);
-      if (!element) continue;
-      const computed = getComputedStyle(element);
-      const declarations: Record<string, string> = {};
-      for (const prop of properties) {
-        const value = safeValue(computed.getPropertyValue(prop));
-        if (value) declarations[prop] = value;
+    const read = (): SidebarThemeSnapshot => {
+      const styles: SidebarThemeSnapshot["styles"] = {};
+      for (const [key, [selector, properties]] of Object.entries(ELEMENTS)) {
+        const element = selector === ":scope" ? container : container.querySelector<HTMLElement>(selector);
+        if (!element) continue;
+        const computed = getComputedStyle(element);
+        const declarations: Record<string, string> = {};
+        for (const prop of properties) {
+          const value = safeValue(computed.getPropertyValue(prop));
+          if (value) declarations[prop] = value;
+        }
+        styles[key] = declarations;
       }
-      styles[key] = declarations;
-    }
-    // The explorer is usually transparent over its pane: take the first opaque layer behind it.
-    if (!styles.pane["background-color"] || TRANSPARENT.test(styles.pane["background-color"])) {
-      let layer: HTMLElement | null = container.parentElement;
-      let found = "";
-      while (layer && !found) {
-        const background = getComputedStyle(layer).backgroundColor;
-        if (background && !TRANSPARENT.test(background)) found = background;
-        layer = layer.parentElement;
+      // The explorer is usually transparent over its pane: take the first opaque layer behind it.
+      if (!styles.pane["background-color"] || TRANSPARENT.test(styles.pane["background-color"])) {
+        let layer: HTMLElement | null = container.parentElement;
+        let found = "";
+        while (layer && !found) {
+          const background = getComputedStyle(layer).backgroundColor;
+          if (background && !TRANSPARENT.test(background)) found = background;
+          layer = layer.parentElement;
+        }
+        if (found && safeValue(found)) styles.pane["background-color"] = found;
+        else delete styles.pane["background-color"];
       }
-      if (found && safeValue(found)) styles.pane["background-color"] = found;
-      else delete styles.pane["background-color"];
-    }
-    // Hover lives in the theme's variables, not on any resting row: resolve them on a probe in the copy.
-    const probe = container.createDiv();
-    probe.style.cssText = "background-color:var(--nav-item-background-hover);color:var(--nav-item-color-hover)";
-    const hover = getComputedStyle(probe);
-    styles.hover = {};
-    if (!TRANSPARENT.test(hover.backgroundColor) && safeValue(hover.backgroundColor)) styles.hover["background-color"] = hover.backgroundColor;
-    if (safeValue(hover.color)) styles.hover.color = hover.color;
-    if (!styles.file?.color && styles.pane.color) (styles.file ??= {}).color = styles.pane.color;
-    const folders = names.map((name, index) => {
-      const title = folderItems[index].querySelector<HTMLElement>(":scope > .nav-folder-title")!;
-      const titleStyle = getComputedStyle(title);
-      const guide = getComputedStyle(folderItems[index].querySelector<HTMLElement>(":scope > .nav-folder-children")!);
-      const tint: SidebarThemeSnapshot["folders"][number] = { name, color: safeValue(titleStyle.color) ?? "" };
-      if (guide.borderLeftStyle !== "none" && parseFloat(guide.borderLeftWidth) > 0 && safeValue(guide.borderLeftColor)) {
-        tint.guide = guide.borderLeftColor;
-      }
-      // A rainbow theme tints each folder's hover in its own colour (AnuPpuccin sets it on the title). Read it
-      // as a background on a probe inside the title: the raw variable keeps the theme's newlines and tabs.
-      const tintProbe = title.createDiv();
-      tintProbe.style.cssText = "background-color:var(--nav-item-background-hover)";
-      const folderHover = getComputedStyle(tintProbe).backgroundColor;
-      tintProbe.remove();
-      if (!TRANSPARENT.test(folderHover) && safeValue(folderHover) && folderHover !== styles.hover["background-color"]) tint.hover = folderHover;
-      return tint;
-    }).filter((tint) => tint.color && tint.name.length <= 255 && !/[\x00-\x1f]/.test(tint.name)).slice(0, 256);
-    return { mode: document.body.classList.contains("theme-dark") ? "dark" : "light", styles, folders };
+      // Hover lives in the theme's variables, not on any resting row: resolve them on a probe in the copy.
+      const probe = container.createDiv();
+      probe.style.cssText = "background-color:var(--nav-item-background-hover);color:var(--nav-item-color-hover)";
+      const hover = getComputedStyle(probe);
+      styles.hover = {};
+      if (!TRANSPARENT.test(hover.backgroundColor) && safeValue(hover.backgroundColor)) styles.hover["background-color"] = hover.backgroundColor;
+      if (safeValue(hover.color)) styles.hover.color = hover.color;
+      probe.remove();
+      if (!styles.file?.color && styles.pane.color) (styles.file ??= {}).color = styles.pane.color;
+      const folders = names.map((name, index) => {
+        const title = folderItems[index].querySelector<HTMLElement>(":scope > .nav-folder-title")!;
+        const titleStyle = getComputedStyle(title);
+        const guide = getComputedStyle(folderItems[index].querySelector<HTMLElement>(":scope > .nav-folder-children")!);
+        const tint: SidebarThemeSnapshot["folders"][number] = { name, color: safeValue(titleStyle.color) ?? "" };
+        if (guide.borderLeftStyle !== "none" && parseFloat(guide.borderLeftWidth) > 0 && safeValue(guide.borderLeftColor)) {
+          tint.guide = guide.borderLeftColor;
+        }
+        // A rainbow theme tints each folder's hover in its own colour (AnuPpuccin sets it on the title). Read it
+        // as a background on a probe inside the title: the raw variable keeps the theme's newlines and tabs.
+        const tintProbe = title.createDiv();
+        tintProbe.style.cssText = "background-color:var(--nav-item-background-hover)";
+        const folderHover = getComputedStyle(tintProbe).backgroundColor;
+        tintProbe.remove();
+        if (!TRANSPARENT.test(folderHover) && safeValue(folderHover) && folderHover !== styles.hover["background-color"]) tint.hover = folderHover;
+        return tint;
+      }).filter((tint) => tint.color && tint.name.length <= 255 && !/[\x00-\x1f]/.test(tint.name)).slice(0, 256);
+      return { mode: document.body.classList.contains("theme-dark") ? "dark" : "light", styles, folders };
+    };
+    const snapshot = read();
+    if (!measureOther) return { snapshot };
+    const other = inOtherMode(document.body, read);
+    return other && other.mode !== snapshot.mode ? { snapshot, other } : { snapshot };
   } finally {
     container.remove();
     scaffold?.remove();

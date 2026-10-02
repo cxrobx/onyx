@@ -111,7 +111,7 @@ class SidebarThemeTests(unittest.TestCase):
                 body = {"token": config.token, "vault_root": str(vault), "snapshot": snapshot()}
                 self.assertEqual(client.post("/api/sidebar-theme", json={**body, "token": "wrong"}).status_code, 403)
                 self.assertEqual(client.post("/api/sidebar-theme", json=body, headers={"Origin": "https://evil.test"}).status_code, 403)
-                self.assertEqual(client.post("/api/sidebar-theme", content="x" * 80_000).status_code, 413)
+                self.assertEqual(client.post("/api/sidebar-theme", content="x" * 150_000).status_code, 413)
                 response = client.post("/api/sidebar-theme", json=body, headers={"Origin": "app://obsidian.md"})
                 self.assertEqual(response.status_code, 200)
                 self.assertEqual(response.headers["access-control-allow-origin"], "app://obsidian.md")

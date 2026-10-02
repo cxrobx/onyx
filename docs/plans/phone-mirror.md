@@ -135,6 +135,7 @@ v1:
 ```json
 "look": {
   "vault": {"mode": "light", "base": [253, 246, 227], "tokens": {"--bg-primary": "253 246 227", "…": "…"}},
+  "vaults": {"light": {"mode": "light", "…": "…"}, "dark": {"mode": "dark", "…": "…"}},
   "follow_page": true,
   "appearance": "system"
 }
@@ -146,7 +147,15 @@ v1:
   `--line`, `--line-soft` and `--selected`, and a CSS font list for the optional
   `--ui-font`. It is `null` when "Match vault appearance" is off or the snapshots
   give no readable palette. While it is set, the whole app, its web views included,
-  takes `mode`, as the Mac's window does.
+  takes `mode`, as the Mac's window does. It is in the mode the Mac's Color theme
+  picks while the look is on (`vault_mode`: Same as Obsidian, System, Light or Dark).
+- `vaults` (optional, added 2026-10-02) is the same palette for each of the vault's
+  colour modes the Obsidian plugin has measured: it measures the mode Obsidian shows
+  and the other one beside it. A mode not measured yet is `null`, and `vaults` is
+  `null` whenever `vault` is off. The phone's own Appearance setting (Same as Mac,
+  System, Light or Dark) wears `vaults[mode]`. Notes are published with both modes'
+  reading styles, each under its `prefers-color-scheme` block, once both are measured,
+  so a note follows the mode the phone holds its web views to.
 - `follow_page` is the Mac's "follow the page" setting (`html_follow_page`). While
   it is on, an HTML page's measured colours (the page's opaque body ground, or the
   root's when the body is transparent; none when either has a background image; the

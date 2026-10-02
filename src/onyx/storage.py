@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 
 # Extra browser origins allowed to reach /ask and the JSON APIs, beyond the
 # built-in localhost set. The Obsidian plugin's renderer origin is the default.
@@ -38,6 +38,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "request_timeout": 120,
     "glass_transparency": 38,
     "appearance_theme": "system",
+    # Which of the vault's colour modes to wear while Match vault appearance is on (vault_mode.CHOICES).
+    "vault_mode": "obsidian",
     "markdown_follow_obsidian": True,
     "sidebar_follow_obsidian": True,
     "html_follow_page": True,
@@ -138,11 +140,13 @@ class Storage:
             CREATE TABLE IF NOT EXISTS markdown_themes (
                 vault_root TEXT PRIMARY KEY,
                 snapshot_json TEXT NOT NULL,
+                other_json TEXT,
                 updated_at REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS sidebar_themes (
                 vault_root TEXT PRIMARY KEY,
                 snapshot_json TEXT NOT NULL,
+                other_json TEXT,
                 updated_at REAL NOT NULL
             );
             CREATE TABLE IF NOT EXISTS documents (
@@ -230,6 +234,11 @@ class Storage:
         }
         if "recent_hidden" not in document_columns:
             self._db.execute("ALTER TABLE documents ADD COLUMN recent_hidden INTEGER NOT NULL DEFAULT 0")
+        # The vault's other colour mode, measured by the plugin beside the one Obsidian shows (vault_mode).
+        for table in ("markdown_themes", "sidebar_themes"):
+            theme_columns = {str(row[1]) for row in self._db.execute(f"PRAGMA table_info({table})").fetchall()}
+            if "other_json" not in theme_columns:
+                self._db.execute(f"ALTER TABLE {table} ADD COLUMN other_json TEXT")
         self._db.execute(
             "INSERT INTO app_meta(key, value) VALUES('schema_version', ?) "
             "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
@@ -303,6 +312,11 @@ class Storage:
             if value not in {"system", "light", "dark"}:
                 raise ValueError("Appearance theme must be system, light, or dark.")
             clean["appearance_theme"] = value
+        if "vault_mode" in patch:
+            value = str(patch["vault_mode"])
+            if value not in {"obsidian", "system", "light", "dark"}:
+                raise ValueError("Vault colour mode must be obsidian, system, light, or dark.")
+            clean["vault_mode"] = value
         for key, lower, upper in (
             ("cache_ttl_hours", 0, 24 * 365),
             ("cache_max_entries", 0, 1000),
@@ -372,36 +386,48 @@ class Storage:
         return self.settings(model_default=model_default)
 
     # Obsidian appearance snapshots, one per vault and kind: the reading view
-    # (markdown_themes) and the file explorer (sidebar_themes).
-    def _save_theme(self, table: str, root: Path, snapshot: dict[str, Any]) -> None:
+    # (markdown_themes) and the file explorer (sidebar_themes). Each row holds the mode Obsidian was showing
+    # and, when the plugin measured it, the other one (other_json). A sync without the other mode (an older
+    # plugin, or a heartbeat that didn't measure it) keeps the stored one.
+    def _save_theme(self, table: str, root: Path, snapshot: dict[str, Any], other: dict[str, Any] | None) -> None:
         encoded = json.dumps(snapshot, sort_keys=True)
+        other_encoded = json.dumps(other, sort_keys=True) if other else None
         with self._lock:
             self._db.execute(
-                f"INSERT INTO {table}(vault_root, snapshot_json, updated_at) VALUES(?, ?, ?) "
+                f"INSERT INTO {table}(vault_root, snapshot_json, other_json, updated_at) VALUES(?, ?, ?, ?) "
                 "ON CONFLICT(vault_root) DO UPDATE SET snapshot_json=excluded.snapshot_json, "
-                "updated_at=excluded.updated_at WHERE snapshot_json != excluded.snapshot_json",
-                (str(root.resolve()), encoded, time.time()),
+                f"other_json=COALESCE(excluded.other_json, {table}.other_json), updated_at=excluded.updated_at "
+                f"WHERE {table}.snapshot_json != excluded.snapshot_json "
+                f"OR (excluded.other_json IS NOT NULL AND excluded.other_json IS NOT {table}.other_json)",
+                (str(root.resolve()), encoded, other_encoded, time.time()),
             )
             self._db.commit()
 
-    def _theme(self, table: str, root: Path) -> dict[str, Any] | None:
+    def _theme(self, table: str, root: Path, mode: str | None) -> dict[str, Any] | None:
+        """The snapshot Obsidian was showing, or with ``mode`` the one of that mode (None if it hasn't been measured)."""
         with self._lock:
             row = self._db.execute(
-                f"SELECT snapshot_json FROM {table} WHERE vault_root=?", (str(root.resolve()),)
+                f"SELECT snapshot_json, other_json FROM {table} WHERE vault_root=?", (str(root.resolve()),)
             ).fetchone()
-        return json.loads(row[0]) if row else None
+        if not row:
+            return None
+        current = json.loads(row[0])
+        if mode is None or current.get("mode") == mode:
+            return current
+        other = json.loads(row[1]) if row[1] else None
+        return other if other and other.get("mode") == mode else None
 
-    def save_markdown_theme(self, root: Path, snapshot: dict[str, Any]) -> None:
-        self._save_theme("markdown_themes", root, snapshot)
+    def save_markdown_theme(self, root: Path, snapshot: dict[str, Any], other: dict[str, Any] | None = None) -> None:
+        self._save_theme("markdown_themes", root, snapshot, other)
 
-    def markdown_theme(self, root: Path) -> dict[str, Any] | None:
-        return self._theme("markdown_themes", root)
+    def markdown_theme(self, root: Path, mode: str | None = None) -> dict[str, Any] | None:
+        return self._theme("markdown_themes", root, mode)
 
-    def save_sidebar_theme(self, root: Path, snapshot: dict[str, Any]) -> None:
-        self._save_theme("sidebar_themes", root, snapshot)
+    def save_sidebar_theme(self, root: Path, snapshot: dict[str, Any], other: dict[str, Any] | None = None) -> None:
+        self._save_theme("sidebar_themes", root, snapshot, other)
 
-    def sidebar_theme(self, root: Path) -> dict[str, Any] | None:
-        return self._theme("sidebar_themes", root)
+    def sidebar_theme(self, root: Path, mode: str | None = None) -> dict[str, Any] | None:
+        return self._theme("sidebar_themes", root, mode)
 
     def sync_builtin_roots(self, roots: tuple[Path, ...]) -> None:
         now = time.time()

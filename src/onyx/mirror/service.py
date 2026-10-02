@@ -72,20 +72,26 @@ def look_for(storage, roots: dict[str, Path]) -> dict:
     """What the Mac app wears, for the phone's chrome: the index's ``look`` (wire format, "Look").
 
     ``vault`` is the palette ``app.current_vault_look`` wears, under the same switch ("Match vault appearance" is
-    either follow setting), so the phone shows the vault exactly when the Mac does.
+    either follow setting) and in the mode the Mac's Color theme picks (vault_mode), so the phone shows the vault
+    exactly when and as the Mac does. ``vaults`` is the vault's palette in each mode the plugin has measured, for the
+    phone's own Appearance setting.
     """
-    from .. import vault_look
+    from .. import vault_look, vault_mode
 
     settings = storage.settings()
     notes = roots.get("Notes")
     enabled = bool(settings.get("markdown_follow_obsidian", True) or settings.get("sidebar_follow_obsidian", True))
-    vault = (
-        vault_look.palette(storage.markdown_theme(notes), storage.sidebar_theme(notes))
-        if enabled and notes is not None else None
-    )
+    vault = vaults = None
+    if enabled and notes is not None:
+        vault = vault_look.palette(*vault_mode.snapshots(storage, notes, settings.get("vault_mode")))
+        vaults = {}
+        for mode in ("light", "dark"):
+            markdown = storage.markdown_theme(notes, mode)
+            vaults[mode] = vault_look.palette(markdown, storage.sidebar_theme(notes, mode)) if markdown else None
     appearance = settings.get("appearance_theme")
     return {
         "vault": vault,
+        "vaults": vaults,
         "follow_page": bool(settings.get("html_follow_page", True)),
         "appearance": appearance if appearance in ("system", "light", "dark") else "system",
     }

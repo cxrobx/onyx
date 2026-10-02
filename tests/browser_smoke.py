@@ -1537,6 +1537,8 @@ class BrowserSmokeTests(unittest.TestCase):
         explorer = f"""<!doctype html><style>
             body {{ --nav-item-background-hover: rgba(0, 0, 0, 0.05); font: 13px Menlo, monospace; {schemes} }}
             .mod-left-split {{ background: rgb(0, 0, 0); }} .workspace-tab-container {{ background: rgb(253, 246, 227); color: rgb(7, 54, 66); }}
+            .theme-dark .workspace-tab-container {{ background: rgb(0, 43, 54); color: rgb(238, 232, 213); }}
+            .theme-dark .nav-file-title {{ color: rgb(238, 232, 213); }}
             .nav-folder-title {{ padding: 4px 0; }} .nav-file-title {{ color: rgb(7, 54, 66); }}
             .nav-file-title.is-active {{ background: rgb(238, 232, 213); }} .search-input-container input {{ border-radius: 999px; }}
             {rainbow}
@@ -1554,9 +1556,27 @@ class BrowserSmokeTests(unittest.TestCase):
             page.set_content(explorer)
             page.add_script_tag(content=helpers)
             page.add_script_tag(content=bundle.stdout)
-            snapshot = page.evaluate("() => OnyxSidebar.captureSidebarTheme({ vault: { getRoot: () => ({ children: [] }) } })")
+            app = "{ vault: { getRoot: () => ({ children: [] }) } }"
+            snapshot = page.evaluate(f"() => OnyxSidebar.captureSidebarTheme({app}).snapshot")
             self.assertEqual(page.locator(".onyx-sidebar-sample, .onyx-sample-folder").count(), 0)  # the copy is gone again
+            # The other colour mode: the body's class flips for the read and comes back exactly as it was, so the
+            # plugin's own body observer (which compares before and after) has nothing to answer.
+            measured = page.evaluate(f"""async () => {{
+                const before = document.body.className, seen = [];
+                const observer = new MutationObserver(() => seen.push(document.body.className));
+                observer.observe(document.body, {{ attributes: true, attributeFilter: ['class'] }});
+                const capture = OnyxSidebar.captureSidebarTheme({app}, true);
+                await new Promise((resolve) => setTimeout(resolve));
+                observer.disconnect();
+                return {{ capture, before, after: document.body.className, seen }};
+            }}""")
             browser.close()
+        other = measured["capture"]["other"]
+        self.assertEqual(measured["capture"]["snapshot"], snapshot)
+        self.assertEqual((other["mode"], other["styles"]["pane"]["background-color"]), ("dark", "rgb(0, 43, 54)"))
+        self.assertEqual(other["styles"]["file"]["color"], "rgb(238, 232, 213)")
+        self.assertEqual(measured["after"], measured["before"])
+        self.assertEqual(measured["seen"], [measured["before"]], "one observer call, finding the body as it was")
 
         self.assertEqual(snapshot["mode"], "light")
         self.assertEqual(snapshot["styles"]["pane"]["background-color"], "rgb(253, 246, 227)")  # the pane, not the frame
@@ -1573,7 +1593,7 @@ class BrowserSmokeTests(unittest.TestCase):
             token = json.load(response)["token"]
         request = urllib.request.Request(
             self.base_url + "/api/sidebar-theme", method="POST", headers={"Content-Type": "application/json"},
-            data=json.dumps({"token": token, "vault_root": str(vault), "snapshot": snapshot}).encode(),
+            data=json.dumps({"token": token, "vault_root": str(vault), "snapshot": snapshot, "other": other}).encode(),
         )
         with urllib.request.urlopen(request) as response:  # raises on 400: something off the service's allowlist
             self.assertEqual(response.status, 200)
@@ -3545,6 +3565,67 @@ class BrowserSmokeTests(unittest.TestCase):
                     self.assertNotEqual(panel.evaluate("e => getComputedStyle(e).backgroundColor"), "rgba(253, 246, 227, 0.97)")
                     browser.close()
 
+        self.assertEqual(page_errors, [])
+
+    def test_color_theme_picks_the_vaults_light_or_dark_live(self) -> None:
+        # While Match vault appearance is on, Color theme picks which of the vault's modes the app wears (vault_mode).
+        # A choice re-themes the window and the page already in the reader, with no reload; a mode the plugin hasn't
+        # measured yet says so in Settings until it arrives, and the app keeps the mode it has. Both engines: the app
+        # is WebKit.
+        light = {"mode": "light", "styles": {"content": {"background-color": "rgb(253, 246, 227)", "color": "rgb(0, 43, 54)"},
+                                             "a": {"color": "rgb(203, 75, 22)"}}}
+        dark = {"mode": "dark", "styles": {"content": {"background-color": "rgb(0, 43, 54)", "color": "rgb(238, 232, 213)"},
+                                           "a": {"color": "rgb(42, 161, 152)"}}}
+        storage: Storage = self.app.state.storage
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    vault = self.root / f"modes-{engine}"
+                    vault.mkdir()
+                    note = vault / "note.txt"
+                    note.write_text("Plain words.\n", encoding="utf-8")
+                    storage.update_settings({"vault_root": str(vault), "markdown_follow_obsidian": True,
+                                             "sidebar_follow_obsidian": True, "vault_mode": "obsidian"}, model_default="sonnet")
+                    storage.save_markdown_theme(vault, light)  # an older plugin: Obsidian's own mode only
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1100, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    reader = page.frame_locator("iframe[name=reader]")
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "light")
+
+                    page.get_by_role("button", name="Settings", exact=True).click()
+                    choice, plain, help_text = page.locator("#vault-mode"), page.locator("#appearance-theme"), page.locator("#theme-follow")
+                    expect(choice).to_be_visible()
+                    expect(plain).to_be_hidden()
+                    expect(choice).to_have_value("obsidian")
+                    expect(page.locator("label[for=vault-mode]")).to_have_text("Color theme")
+                    self.assertEqual(choice.locator("option").all_inner_texts(), ["Same as Obsidian", "System", "Light", "Dark"])
+
+                    page.select_option("#vault-mode", "dark")
+                    expect(help_text).to_contain_text("dark colours arrive with the Onyx plugin’s next sync")
+                    self.assertEqual(storage.settings()["vault_mode"], "dark")
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "light")
+
+                    # The plugin's next sync brings the dark mode measured beside the light one.
+                    storage.save_markdown_theme(vault, light, dark)
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "dark", timeout=8000)
+                    expect(reader.locator("body")).to_have_css("background-color", "rgb(0, 43, 54)", timeout=8000)
+                    expect(help_text).to_have_text(re.compile("^Your vault theme’s light or dark colours"), timeout=8000)
+
+                    page.select_option("#vault-mode", "light")
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "light", timeout=8000)
+                    expect(reader.locator("body")).to_have_css("background-color", "rgb(253, 246, 227)", timeout=8000)
+                    page.select_option("#vault-mode", "dark")
+                    expect(reader.locator("html")).to_have_attribute("data-askw-look", "dark", timeout=8000)
+
+                    # Without the vault look, Color theme is the app's own System / Light / Dark again.
+                    page.locator("#vault-look-toggle").uncheck()
+                    expect(plain).to_be_visible(timeout=8000)
+                    expect(choice).to_be_hidden()
+                    expect(page.locator("label[for=appearance-theme]")).to_have_text("Color theme")
+                    browser.close()
         self.assertEqual(page_errors, [])
 
     def test_the_vault_look_keeps_every_label_readable_where_it_lands(self) -> None:

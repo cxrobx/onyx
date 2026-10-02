@@ -473,6 +473,20 @@ class MirrorBuildTests(unittest.TestCase):
         storage.update_settings({"markdown_follow_obsidian": False}, model_default="sonnet")
         self.assertIsNone(markdown_theme_css(storage, self.notes))  # "Match Obsidian" is off, so /view injects nothing
 
+    def test_with_both_modes_measured_a_page_carries_both_for_the_phone_to_pick(self) -> None:
+        dark = {"mode": "dark", "styles": {"content": {"color": "rgb(196, 197, 181)", "background-color": "rgb(26, 26, 26)"}}}
+        light = {"mode": "light", "styles": {"content": {"color": "rgb(0, 43, 54)", "background-color": "rgb(253, 246, 227)"}}}
+        storage = Storage(self.base / "data")
+        self.addCleanup(storage.close)
+        storage.save_markdown_theme(self.notes, dark, light)
+        css = markdown_theme_css(storage, self.notes)
+        stylesheet = build.markdown_theme.stylesheet
+        self.assertEqual(css, f"@media (prefers-color-scheme: light) {{\n{stylesheet(light)}\n}}\n"
+                              f"@media (prefers-color-scheme: dark) {{\n{stylesheet(dark)}\n}}")
+        # The Mac's Color theme doesn't narrow it: the phone has its own Appearance setting.
+        storage.update_settings({"vault_mode": "dark"}, model_default="sonnet")
+        self.assertEqual(markdown_theme_css(storage, self.notes), css)
+
     # MARK: a bad file
 
     def test_one_bad_file_is_skipped_and_the_rest_build(self) -> None:

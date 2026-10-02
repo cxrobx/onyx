@@ -255,28 +255,31 @@ export class AskService {
     });
   }
 
-  /** Passive sync must never launch/focus the app. A fresh token also handles restarts. */
-  async syncMarkdownTheme(vaultRoot: string, snapshot: MarkdownThemeSnapshot): Promise<void> {
+  /**
+   * Passive sync must never launch/focus the app. A fresh token also handles restarts. `other` is the vault's other
+   * colour mode, for Onyx's Color theme setting; an older Onyx ignores it.
+   */
+  async syncMarkdownTheme(vaultRoot: string, snapshot: MarkdownThemeSnapshot, other?: MarkdownThemeSnapshot): Promise<void> {
     const signal = AbortSignal.timeout(5000);
     const session = await this.json<Session>("/api/session", { signal });
     if (!session.token) throw new ServiceError("incompatible", "Update Onyx to sync Markdown appearance.");
     await this.json("/api/markdown-theme", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: session.token, vault_root: vaultRoot, snapshot }),
+      body: JSON.stringify({ token: session.token, vault_root: vaultRoot, snapshot, ...(other ? { other } : {}) }),
       signal,
     });
   }
 
   /** The file explorer's look, for Onyx's vault sidebar. Passive like the reading theme. */
-  async syncSidebarTheme(vaultRoot: string, snapshot: SidebarThemeSnapshot): Promise<void> {
+  async syncSidebarTheme(vaultRoot: string, snapshot: SidebarThemeSnapshot, other?: SidebarThemeSnapshot): Promise<void> {
     const signal = AbortSignal.timeout(5000);
     const session = await this.json<Session>("/api/session", { signal });
     if (!session.token) throw new ServiceError("incompatible", "Update Onyx to sync the sidebar appearance.");
     await this.json("/api/sidebar-theme", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ token: session.token, vault_root: vaultRoot, snapshot }),
+      body: JSON.stringify({ token: session.token, vault_root: vaultRoot, snapshot, ...(other ? { other } : {}) }),
       signal,
     });
   }

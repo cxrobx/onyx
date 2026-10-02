@@ -81,7 +81,7 @@ export class OnyxSettingTab extends PluginSettingTab {
         button.setButtonText("Sync now").onClick(async () => {
           button.setDisabled(true);
           try {
-            await this.plugin.syncMarkdownTheme();
+            await this.plugin.syncMarkdownTheme(true);
             new Notice(this.plugin.sidebarError
               ? `Markdown appearance synced. Sidebar appearance failed: ${this.plugin.sidebarError}`
               : "Markdown and sidebar appearance synced. Onyx updates within a few seconds.");

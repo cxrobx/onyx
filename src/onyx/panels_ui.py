@@ -106,7 +106,7 @@ PANELS_CSS = """/* The two modals. cxtasks' SettingsDialog: opaque (a translucen
 PANELS_HTML = """<dialog id=settings-modal class="modal settings-modal" aria-labelledby=settings-title><div class=modal-head><h2 id=settings-title>Settings</h2><button type=button class=modal-x data-close aria-label="Close settings">__CLOSE__</button></div><div class=modal-body>
 <section class=set-sec id=setup aria-labelledby=set-setup><h3 id=set-setup>Setup</h3><div id=setup-steps class=meta>Checking…</div><div class=diag-bar><button id=setup-dismiss type=button class=secondary>Don’t open Setup on launch</button></div></section>
 <section class=set-sec aria-labelledby=set-appearance><h3 id=set-appearance>Appearance</h3><form id=appearance-form class=set-grid>
-<div class=field><label for=appearance-theme>Color theme</label><select id=appearance-theme name=appearance_theme><option value=system>System</option><option value=light>Light</option><option value=dark>Dark</option></select><p id=theme-follow class=field-help hidden>Following your vault while Match vault appearance is on.</p></div>
+<div class=field><label id=theme-label for=appearance-theme>Color theme</label><select id=appearance-theme name=appearance_theme><option value=system>System</option><option value=light>Light</option><option value=dark>Dark</option></select><select id=vault-mode name=vault_mode hidden><option value=obsidian>Same as Obsidian</option><option value=system>System</option><option value=light>Light</option><option value=dark>Dark</option></select><p id=theme-follow class=field-help hidden></p></div>
 <div class=field><label for=glass-transparency>Window transparency</label><input id=glass-transparency class=cx-slider name=glass_transparency type=range min=0 max=100 value="__GLASS__" style="--fill:__GLASS__%"><div class=glass-scale><span>Solid</span><strong id=glass-value>__GLASS__% glass</strong><span>Glass</span></div></div>
 <div class="field wide"><label class=check><input id=vault-look-toggle type=checkbox> Match vault appearance</label><p id=vault-look-status class=field-help>The whole app in your vault’s colours and font — the sidebar, these dialogs, your notes — shared by the Onyx Obsidian plugin.</p></div>
 <div class="field wide"><label class=check><input id=page-look-toggle name=html_follow_page type=checkbox> Match page appearance (HTML)</label><p class=field-help>Use the HTML page’s colours around it. Notes and pages without a clear background keep your usual look.</p></div></form></section>
@@ -162,7 +162,7 @@ async function commit(el){if(!el.name||!el.form)return;if(el.type==='number'&&!e
 const patch={[el.name]:valueOf(el)};if(el.id==='provider')renderProvider(el.value);if(el.id==='model')describeModel($('#provider').value);if(el.id==='provider'||el.id==='model'){const m=$('#model'),f=$('#reasoning-effort');if(m.value)patch[m.name]=m.value;if(f.value)patch[f.name]=f.value}
 try{SETTINGS=(await send('/api/settings','POST',{settings:patch})).settings}catch(e){say(e.message,'bad');revert(el.form);return}
 if('vault_root' in patch||'html_vault_root' in patch){refreshRoots();reloadTrees();syncSidebarTheme(true);loadSetup()}
-if('html_follow_page' in patch)await syncSidebarTheme(true);
+if('html_follow_page' in patch||'vault_mode' in patch)await syncSidebarTheme(true);
 if(el.form.id!=='appearance-form')say('Saved')}
 for(const form of forms){form.addEventListener('submit',e=>e.preventDefault());form.addEventListener('change',e=>{if(e.target.id==='appearance-theme')applyTheme(e.target.value);commit(e.target)})}
 $('#glass-transparency').addEventListener('input',e=>setGlass(e.target.value));
@@ -173,7 +173,11 @@ $('#roots').addEventListener('click',async e=>{const b=e.target.closest('[data-r
 $('#add-root').onclick=async()=>{try{const p=await window.webkit.messageHandlers.askwPick.postMessage({kind:'folder',initial:''});if(p){renderRoots((await send('/api/roots','POST',{path:p})).roots);say('Allowed folder added')}}catch(e){say(e.message,'bad')}};
 // One switch for the whole vault look: the reading styles and the explorer's look are its two settings, set together.
 async function lookStatus(){try{const [l,t]=await Promise.all([getJSON('/api/vault-look'),getJSON('/api/sidebar-theme')]),sync=t.last_sync;$('#vault-look-status').textContent=!l.enabled?'Using Onyx’s own look.':sync&&!sync.ok?'Obsidian’s look was refused: '+sync.error:l.available?'Following your vault. Updates automatically while Obsidian is open.':'Waiting for Obsidian. Enable the Onyx plugin in your configured vault; after updating it, turn it off and on in Obsidian ▸ Settings ▸ Community plugins.'}catch(e){}}
-function syncThemeControl(){const on=!!LOOK.css;$('#appearance-theme').disabled=on;$('#theme-follow').hidden=!on}
+// While the vault look is on, Color theme picks which of the vault's modes to wear (vault_mode): Obsidian's own, macOS's,
+// or one fixed. The plugin measures both; until it has, the one asked for can't be worn yet, and the help says so.
+function syncThemeControl(){const on=!!LOOK.css,help=$('#theme-follow'),want=LOOK.wanted,missing=on&&want&&!(LOOK.modes||[]).includes(want);
+$('#appearance-theme').hidden=on;$('#vault-mode').hidden=!on;$('#theme-label').htmlFor=on?'vault-mode':'appearance-theme';help.hidden=!on;
+help.textContent=missing?`Your vault’s ${want} colours arrive with the Onyx plugin’s next sync. After updating it, turn it off and on in Obsidian ▸ Settings ▸ Community plugins.`:'Your vault theme’s light or dark colours. Same as Obsidian follows the mode Obsidian is in.'}
 document.addEventListener('onyx:look',()=>{syncThemeControl();if(settingsDlg.open)lookStatus()});syncThemeControl();
 $('#vault-look-toggle').addEventListener('change',async e=>{const on=e.target.checked;try{SETTINGS=(await send('/api/settings','POST',{settings:{markdown_follow_obsidian:on,sidebar_follow_obsidian:on}})).settings}catch(err){say(err.message,'bad');e.target.checked=!on;return}await syncSidebarTheme(true);lookStatus()});
 // The model catalog asks both CLIs, so it is fetched once per page; the settings themselves every time the dialog opens.

@@ -17,10 +17,16 @@ import {
 import { OnyxPanel, VIEW_TYPE_ASK_WIDGET } from "./panel";
 import { AskService, ServiceError } from "./service";
 import { OnyxSettingTab, DEFAULT_SETTINGS, type OnyxSettings } from "./settings";
-import { captureMarkdownTheme } from "./markdown-theme";
-import { captureSidebarTheme } from "./sidebar-theme";
+import { bodySignature } from "./color-mode";
+import { captureMarkdownTheme, type MarkdownThemeSnapshot } from "./markdown-theme";
+import { captureSidebarTheme, type SidebarThemeCapture, type SidebarThemeSnapshot } from "./sidebar-theme";
 
 type Action = "eli5" | "prove" | "ask";
+
+/** The other mode's last measurement, while it still is the other mode: a stale one would be refused whole. */
+function opposite<T extends { mode: string }>(snapshot: T, other: T | undefined): T | undefined {
+  return other && other.mode !== snapshot.mode ? other : undefined;
+}
 
 const ACTION_TITLES: Record<Action, string> = {
   eli5: "Onyx: ELI5",
@@ -36,6 +42,13 @@ export default class OnyxPlugin extends Plugin {
   private themeStopped = false;
   /** Why the last sidebar-appearance sync failed; "" once one succeeds. */
   sidebarError = "";
+  // The vault's other colour mode (color-mode.ts). Measuring it flips the whole window's styles, so it is measured
+  // only when the theme may have changed (a css-change, a real change to the body, this mode reading differently,
+  // Sync now) and the last measurement is re-sent on the heartbeat.
+  private otherStale = true;
+  private lastMarkdown = "";
+  private otherMarkdown?: MarkdownThemeSnapshot;
+  private otherSidebar?: SidebarThemeSnapshot;
 
   async onload(): Promise<void> {
     await this.loadSettings();
@@ -47,8 +60,17 @@ export default class OnyxPlugin extends Plugin {
     this.app.workspace.onLayoutReady(() => {
       if (this.themeStopped) return;
       this.scheduleMarkdownTheme();
-      this.registerEvent(this.app.workspace.on("css-change", () => this.scheduleMarkdownTheme()));
-      const observer = new MutationObserver(() => this.scheduleMarkdownTheme());
+      this.registerEvent(this.app.workspace.on("css-change", () => { this.otherStale = true; this.scheduleMarkdownTheme(); }));
+      // Measuring the other mode flips the body's class and puts it back: a change that ends where it began is the
+      // plugin's own, and answering it would measure again forever.
+      let seen = bodySignature(document.body);
+      const observer = new MutationObserver(() => {
+        const now = bodySignature(document.body);
+        if (now === seen) return;
+        seen = now;
+        this.otherStale = true;
+        this.scheduleMarkdownTheme();
+      });
       observer.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
       this.register(() => observer.disconnect());
       // Reconnect after service restarts; also catches appearance plugins that do
@@ -127,19 +149,40 @@ export default class OnyxPlugin extends Plugin {
     }, 350);
   }
 
-  async syncMarkdownTheme(): Promise<void> {
+  /** `remeasure` (Sync now) measures the other colour mode again even if nothing seems to have changed. */
+  async syncMarkdownTheme(remeasure = false): Promise<void> {
     if (this.themeStopped) return;
+    if (remeasure) this.otherStale = true;
     if (this.themeSync) return this.themeSync;
     const root = this.vaultPath();
     if (!root) throw new Error("Markdown appearance sync requires a local vault.");
     this.themeSync = (async () => {
-      const snapshot = await captureMarkdownTheme(this.app);
+      let measured = false;
+      const markdown = await captureMarkdownTheme(this.app, (snapshot) => {
+        measured = this.otherStale || JSON.stringify(snapshot) !== this.lastMarkdown;
+        return measured;
+      });
       if (this.themeStopped) return;
-      await this.service.syncMarkdownTheme(root, snapshot);
+      this.lastMarkdown = JSON.stringify(markdown.snapshot);
+      // Measured straight after the reading view, before anything can paint, so one restyle covers both flips.
+      let sidebar: SidebarThemeCapture | null = null;
+      let sidebarFailure: unknown = null;
+      try {
+        sidebar = captureSidebarTheme(this.app, measured);
+      } catch (error) {
+        sidebarFailure = error;
+      }
+      if (measured) {
+        this.otherMarkdown = markdown.other;
+        if (sidebar) this.otherSidebar = sidebar.other;
+        this.otherStale = !sidebar;
+      }
+      await this.service.syncMarkdownTheme(root, markdown.snapshot, opposite(markdown.snapshot, this.otherMarkdown));
       // The file explorer's look rides the same triggers but can never hold back the reading
       // styles. Its failure is kept for Sync now and the console, not swallowed.
       try {
-        await this.service.syncSidebarTheme(root, captureSidebarTheme(this.app));
+        if (!sidebar) throw sidebarFailure;
+        await this.service.syncSidebarTheme(root, sidebar.snapshot, opposite(sidebar.snapshot, this.otherSidebar));
         this.sidebarError = "";
       } catch (error) {
         this.sidebarError = error instanceof Error ? error.message : String(error);
