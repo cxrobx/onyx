@@ -98,7 +98,10 @@ kept. Code is left alone. Each note is saved against the version read for the
 plan, so an edit made meanwhile is never overwritten; the toast names any note
 it could not update, and notes inside a linked folder (another tree's files) are
 reported rather than written. A page's asks, highlights and reading position
-follow it to its new path, in Artifacts too.
+follow it to its new path, in Artifacts too. A dropped row lands at once, before
+the links are done; every tab reading what moved follows it (one still writing
+an answer, once the answer is done), and Back or an old link to the page's old
+path opens it where it went.
 
 Clicking a link swaps the reader pane and moves the tree highlight; the browser
 Back button walks the history. Press `/` to focus the filter box, Escape to clear

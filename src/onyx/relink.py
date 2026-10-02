@@ -141,13 +141,11 @@ def rewrite_note(
     """``text`` (the note at ``old_rel``, at ``new_rel`` once the move is made) with each link that the move would break
     rewritten; and how many were."""
     old_src, new_src = before.root / old_rel, after.root / new_rel
-    code = _code_ranges(text)
-    code_starts = [a for a, _ in code]
-    edits: list[tuple[int, int, str]] = []
+    # Each edit carries where its link starts, so the ones in code can be dropped once there are any: finding the code
+    # is a Markdown parse, and it was 94% of a move's ten seconds when it ran for every note in the vault.
+    edits: list[tuple[int, int, int, str]] = []
 
     for found in _WIKILINK_RE.finditer(text):
-        if _in(code, code_starts, found.start()):
-            continue
         embed, inner = found.group(1) == "!", found.group(2)
         target, bar, alias = inner.partition("|")
         escaped = target.endswith("\\")  # `[[Note\|alias]]` in a table
@@ -169,11 +167,9 @@ def rewrite_note(
         if written is None:
             continue
         inner_new = written + hash_ + heading + ("\\" if escaped else "") + bar + alias
-        edits.append((found.start(2), found.end(2), inner_new))
+        edits.append((found.start(), found.start(2), found.end(2), inner_new))
 
     for found in _MD_LINK_RE.finditer(text):
-        if _in(code, code_starts, found.start()):
-            continue
         dest = found.group(3)
         angle = dest.startswith("<")
         raw = dest[1:-1] if angle else dest
@@ -204,13 +200,17 @@ def rewrite_note(
 
         written = new_path if angle else _encode_like(path_part, new_path)
         new_dest = written + hash_ + fragment
-        edits.append((found.start(3), found.end(3), f"<{new_dest}>" if angle else new_dest))
+        edits.append((found.start(), found.start(3), found.end(3), f"<{new_dest}>" if angle else new_dest))
 
+    if edits:
+        code = _code_ranges(text)
+        code_starts = [a for a, _ in code]
+        edits = [edit for edit in edits if not _in(code, code_starts, edit[0])]
     if not edits:
         return text, 0
-    edits.sort()
+    edits.sort(key=lambda edit: edit[1:])
     out, last = [], 0
-    for start, end, new in edits:
+    for _, start, end, new in edits:
         if start < last:
             continue  # overlapping matches: the first one's
         out += [text[last:start], new]
@@ -223,12 +223,33 @@ def _in_linked(index: VaultIndex, rel: str) -> bool:
     return any(rel == linked or rel.startswith(linked + "/") for linked in index.symlinked_dirs)
 
 
+def _moved_names(moves: dict[str, str]) -> set[str]:
+    """The names of what moves, before and after, casefolded and without extension."""
+    return {os.path.splitext(rel.rsplit("/", 1)[-1])[0].casefold() for pair in moves.items() for rel in pair}
+
+
+def _names_any(text: str, names: set[str]) -> bool:
+    """Whether ``text`` could hold a link the move changes. A note that stays put links through a moved file's name:
+    every wikilink and embed resolves by a key ending in the name (vault.resolve_wikilink, resolve_embed), every
+    Markdown link by a path ending in it, and a link the move makes ambiguous names the file's new name. Read
+    percent-decoded too, for ``[md](Old%20Name.md)``. The rest of the vault goes unscanned: scanning all of it took
+    1.7 s at the service's background QoS."""
+    folded = text.casefold()
+    if any(name in folded for name in names):
+        return True
+    if "%" not in text:
+        return False
+    decoded = urllib.parse.unquote(text).casefold()
+    return any(name in decoded for name in names)
+
+
 def plan(index: VaultIndex, moves: dict[str, str]) -> Plan:
     """What rewriting a move needs: every note whose links it would break, read now, with its new text."""
     out = Plan()
     if not moves:
         return out
     after = moved_index(index, moves)
+    names = _moved_names(moves)
     for item in index.files:
         if item.kind != "note" or item.path.suffix.lower() not in MARKDOWN_EXTENSIONS or item.missing:
             continue
@@ -243,6 +264,8 @@ def plan(index: VaultIndex, moves: dict[str, str]) -> Plan:
                 continue
             if any(Path(rel).stem in raw for rel in moves):
                 out.unreadable.append(item.rel)
+            continue
+        if new_rel == item.rel and not _names_any(text, names):
             continue
         rewritten, links = rewrite_note(text, index, after, moves, item.rel, new_rel)
         if not links:

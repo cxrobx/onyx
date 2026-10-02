@@ -23,7 +23,7 @@ import uvicorn
 from PIL import Image
 from playwright.sync_api import expect, sync_playwright
 
-from onyx import search
+from onyx import relink, search
 from onyx.app import create_app
 from onyx.citations import extract_citations
 from onyx.config import AppConfig
@@ -1391,7 +1391,7 @@ class BrowserSmokeTests(unittest.TestCase):
             self.assertEqual(os.readlink(vault / "Learnings" / "Architect"), str(topic))
             self.assertFalse(os.path.lexists(vault / "Architect"))
             page.wait_for_function(
-                "p => decodeURIComponent(document.getElementById('reader').src).includes(p)",
+                "p => decodeURIComponent(document.getElementById('reader').contentWindow.location.href).includes(p)",
                 arg=str(vault / "Learnings" / "Architect" / "guides" / "wire.html"),
             )
             # A guide-folder link two levels down is one page; pinned, it sorts ahead of the folder.
@@ -1479,7 +1479,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     goals = notes / "Areas" / "Goals.md"
                     self.assertEqual(goals.read_text(encoding="utf-8"), "[the plan](../Archive/Plan.md) and [[Plan|plan]]\n")
                     page.wait_for_function(
-                        "p => decodeURIComponent(document.getElementById('reader').src).includes(p)", arg=str(moved))
+                        "p => decodeURIComponent(document.getElementById('reader').contentWindow.location.href).includes(p)", arg=str(moved))
 
                     # Move To…: a filterable list of the vault's folders.
                     row = page.locator(f"#tree a.file[data-entry='{moved}']")
@@ -1494,6 +1494,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.keyboard.press("Enter")
                     deeper = notes / "Archive" / "Old" / "Plan.md"
                     expect(page.locator(f"#tree a.file[data-entry='{deeper}']")).to_be_visible()
+                    expect(page.locator(".onyx-toast")).to_contain_text("Moved to Archive › Old")  # the row lands first
                     self.assertEqual(goals.read_text(encoding="utf-8"), "[the plan](../Archive/Old/Plan.md) and [[Plan|plan]]\n")
 
                     # Rename in place: the note keeps its .md, and a name link follows the new name.
@@ -1522,6 +1523,97 @@ class BrowserSmokeTests(unittest.TestCase):
                         page.locator("#tree details[data-rel='Areas'] > summary").click()  # Notes' folders start shut
                     goals_row.drag_to(resources)
                     expect(page.locator(f"#tree a.file[data-entry='{notes / 'Resources' / 'Goals.md'}']")).to_be_visible()
+                    self.assertEqual(page_errors, [])
+                    browser.close()
+
+    def test_a_moved_note_lands_at_once_and_every_tab_reading_it_follows(self) -> None:
+        # The row lands where it was dropped before the server answers (a notes move plans its links first, and a slow
+        # answer read as a drop that hadn't taken); tabs behind keep their vault when re-pointed, one whose answer panel
+        # is open is re-pointed too, one still writing its answer waits, and Back never reaches the path that is gone.
+        notes = self.root / "CX"
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    if notes.exists():
+                        shutil.rmtree(notes)
+                    for folder in ("Projects", "Archive", "Areas"):
+                        (notes / folder).mkdir(parents=True)
+                    for rel, title in (("Projects/Plan.md", "Plan"), ("Projects/Brief.md", "Brief"), ("Projects/Notes.md", "Notes"),
+                                       ("Projects/Draft.md", "Draft"), ("Areas/Goals.md", "Goals")):
+                        (notes / rel).write_text(f"# {title}\n\n[[Goals]]\n", encoding="utf-8")
+                    self.app.state.storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
+                    self.app.state.vault.invalidate()
+
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page_errors: list[str] = []
+                    page.on("pageerror", lambda error: page_errors.append(str(error)))
+                    page.goto(f"{self.base_url}/vault?vault=notes", wait_until="networkidle")
+                    for folder in ("Projects", "Areas"):
+                        page.locator(f"#tree details[data-rel='{folder}'] > summary").click()
+                    row = lambda rel: page.locator(f"#tree a.file[data-entry='{notes / rel}']")
+                    shown = "t => (document.getElementById('reader').contentDocument || {}).title === t"
+                    # The tab showing reads Plan, then Goals, so Back has the moved page to go to. Tabs behind: Brief
+                    # (plain), Notes (its answer panel open) and Draft (an answer being written).
+                    row("Projects/Plan.md").click()
+                    page.wait_for_function(shown, arg="Plan")
+                    for title in ("Brief", "Notes", "Draft"):
+                        page.evaluate("h => onyxShell.openHref(h)", row(f"Projects/{title}.md").get_attribute("href"))
+                        page.wait_for_function(shown, arg=title)
+                    page.evaluate("""() => {
+                        const panel = (t, busy) => { const d = TABS.list[t].frame.contentDocument, p = d.createElement('div');
+                          p.className = 'askw-panel open'; p.setAttribute('aria-busy', String(busy)); d.body.append(p) };
+                        panel(2, false); panel(3, true) }""")
+                    page.evaluate("() => activateTab(TABS.list[0])")
+                    page.wait_for_function(shown, arg="Plan")
+                    row("Areas/Goals.md").click()
+                    page.wait_for_function(shown, arg="Goals")
+
+                    # Move the folder holding all three while the server takes its time over the links.
+                    real_plan = relink.plan
+                    def slow_plan(*args, **kwargs):
+                        time.sleep(1.5)
+                        return real_plan(*args, **kwargs)
+                    with patch.object(relink, "plan", slow_plan):
+                        page.locator("#tree details[data-rel='Projects'] > summary").drag_to(
+                            page.locator("#tree details[data-rel='Archive'] > summary"))
+                        expect(page.locator("#tree details[data-rel='Archive/Projects'] > summary")).to_be_visible(timeout=500)
+                        expect(row("Archive/Projects/Plan.md")).to_be_visible(timeout=500)
+                        self.assertTrue((notes / "Projects" / "Plan.md").is_file(), "the row moved before the server did")
+                        expect(page.locator(".onyx-toast")).to_contain_text("Moved to Archive", timeout=10_000)
+                    self.assertTrue((notes / "Archive" / "Projects" / "Plan.md").is_file())
+
+                    tabs = page.evaluate("() => TABS.list.map(t => ({href: t.href, frame: !!t.frame, moved: !!t.moved}))")
+                    moved = str(notes / "Archive" / "Projects")
+                    for tab, title in zip(tabs[1:], ("Brief", "Notes", "Draft")):
+                        query = urllib.parse.parse_qs(urllib.parse.urlparse(tab["href"]).query)
+                        self.assertEqual(query["src"], [f"{moved}/{title}.md"])
+                        self.assertEqual(query.get("folder"), [str(notes)], "a tab behind keeps the vault it reads in")
+                    self.assertEqual([t["frame"] for t in tabs[1:]], [False, False, True])
+                    self.assertTrue(tabs[3]["moved"])
+
+                    # Back from Goals reaches Plan at its new path, never the old one (the browser's cache has it there).
+                    at_new = "p => (document.getElementById('reader').contentWindow.location.search || '').includes(p)"
+                    page.evaluate("() => history.back()")
+                    page.wait_for_function(at_new, arg=urllib.parse.quote(moved, safe=""))
+                    page.wait_for_function(shown, arg="Plan")
+                    expect(row("Archive/Projects/Plan.md")).to_have_class(re.compile(r"\bactive\b"))
+                    page.evaluate("() => history.forward()")
+                    page.wait_for_function(shown, arg="Goals")
+
+                    # The plain tab and the one whose panel was open read from the new path, in the vault; the one still
+                    # writing keeps its page until the answer is done, and is re-pointed when next shown.
+                    for i, title in ((1, "Brief"), (2, "Notes")):
+                        page.evaluate("i => activateTab(TABS.list[i])", i)
+                        page.wait_for_function(at_new, arg=urllib.parse.quote(moved, safe=""))
+                        page.wait_for_function(shown, arg=title)
+                        self.assertIn(f"folder={urllib.parse.quote(str(notes), safe='')}", page.evaluate("() => reader.contentWindow.location.search"))
+                    page.evaluate("() => activateTab(TABS.list[3])")
+                    page.wait_for_function(shown, arg="Draft")
+                    self.assertNotIn(urllib.parse.quote(moved, safe=""), page.evaluate("() => reader.contentWindow.location.search"))
+                    page.evaluate("() => { reader.contentDocument.querySelector('.askw-panel[aria-busy=true]').setAttribute('aria-busy', 'false'); activateTab(TABS.list[0]); activateTab(TABS.list[3]) }")
+                    page.wait_for_function(at_new, arg=urllib.parse.quote(moved, safe=""))
+                    page.wait_for_function(shown, arg="Draft")
                     self.assertEqual(page_errors, [])
                     browser.close()
 

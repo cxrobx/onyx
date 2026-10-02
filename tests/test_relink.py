@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from onyx import relink, vault as vault_mod
 from onyx.vault import VaultIndex
@@ -103,6 +104,38 @@ class RelinkTests(unittest.TestCase):
         _move(self.root, self.root / "Projects/Notes.md", "Projects/Alpha")  # now beside the note that links, so it would win
 
         self.assertEqual(self.read("Projects/Alpha/Read.md"), "[[Areas/Notes]]\n")
+
+    def test_a_name_made_ambiguous_by_a_rename_is_written_as_a_path(self) -> None:
+        # The note that links never names the file being renamed, only the name it takes, so the plan must not pass
+        # it over for failing to mention what moved.
+        self.write("Areas/Notes.md", "areas\n")
+        self.write("Projects/Alpha/Draft.md", "draft\n")
+        self.write("Projects/Alpha/Read.md", "[[Notes]] and `[[Notes]]`\n")
+
+        _rename(self.root, self.root / "Projects/Alpha/Draft.md", "Notes")  # beside the link, so it would now win
+
+        self.assertEqual(self.read("Projects/Alpha/Read.md"), "[[Areas/Notes]] and `[[Notes]]`\n")
+
+    def test_notes_that_never_name_what_moved_are_not_scanned(self) -> None:
+        self.write("Areas/Goals.md", "goals\n")
+        self.write("Projects/Plan.md", "[the goals](../Areas/Goals.md)\n")
+        self.write("Projects/Index.md", "[plan](Old%20Plan.md) [[Elsewhere]]\n")
+        self.write("Other/Unrelated.md", "[[Projects/Index]] and nothing about it\n")
+        index = VaultIndex.build(self.root)
+        entry, moved = vault_mod.plan_move(self.root, self.root / "Areas/Goals.md", "Archive", "Notes")
+        scanned: list[str] = []
+        real = relink.rewrite_note
+
+        def watch(text, before, after, moves, old_rel, new_rel):
+            scanned.append(old_rel)
+            return real(text, before, after, moves, old_rel, new_rel)
+
+        with patch.object(relink, "rewrite_note", watch):
+            planned = relink.plan(index, relink.file_moves(index, entry, moved))
+
+        self.assertEqual(sorted(scanned), ["Areas/Goals.md", "Projects/Plan.md"])
+        self.assertEqual([r.rel for r in planned.rewrites], ["Projects/Plan.md"])
+        self.assertTrue(relink._names_any("[md](../Areas/Old%20Name.md)", {"old name"}))
 
     def test_an_edit_made_after_the_plan_is_never_overwritten(self) -> None:
         self.write("Areas/Goals.md", "[[Projects/Alpha/Plan]]\n")

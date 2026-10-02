@@ -23,9 +23,9 @@ pointer, pushing the others aside, and rolls a title still cut; the script's ``t
 
 The script runs inside the shell's ``<script>`` and leans on it: ``$``, ``esc``, ``store``, ``recall``, ``reader``
 (reassigned here), ``stage``, ``KIND``, ``VAULTS``, ``switchVault``, ``showHome``, ``empty``, ``home``, ``goHome``,
-``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``navigate``, ``readerPage``
-and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs ``restoreTabs`` as
-it starts, and ``remapTabs`` when the sidebar moves or renames a page.
+``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``movedHref``, ``leftBehind``,
+``navigate``, ``readerPage`` and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs
+``restoreTabs`` as it starts, and ``remapTabs`` when the sidebar moves or renames a page.
 """
 
 from __future__ import annotations
@@ -98,15 +98,16 @@ function tabFrame(t,href){const f=document.createElement('iframe');f.name=t.name
 const frames=stage.querySelectorAll(':scope > iframe');(frames.length?frames[frames.length-1]:home).after(f);wireFrame(t,f);return f}
 // Every frame's load: the tab learns what it holds; the one showing drives the shell, and one behind that Back or Forward
 // just moved comes forward.
-function frameLoaded(t){const f=t.frame;t.loaded=true;let l=null;try{l=f.contentWindow.location}catch(e){}
+function frameLoaded(t){const f=t.frame;t.loaded=true;t.moved=false;let l=null;try{l=f.contentWindow.location}catch(e){}
 const blank=!l||!l.href||l.href==='about:blank',q=new URLSearchParams(blank?'':l.search);
 t.href=blank?'':l.pathname+l.search+l.hash;t.src=q.get('src')||'';t.folder=q.get('folder')||'';
+if(!blank&&traversed(f)&&leftBehind(t.src))try{f.contentWindow.location.reload()}catch(e){}
 let title='';try{title=f.contentDocument.title}catch(e){}t.title=title||(t.src?t.src.split('/').pop():'');
 if(f===reader)readerLoaded();else if(!blank&&traversed(f)){activateTab(t);return}tabsChanged()}
 // Bring a tab forward: its frame becomes the reader, the sidebar goes back to the view it was read in, and everything
 // that follows the reader follows it (readerLoaded), as a load would. A tab not shown since a restore gets its frame now.
 function activateTab(t){if(!t||t===TABS.active||!TABS.list.includes(t))return;const was=TABS.active;if(was){was.kind=KIND;was.used=Date.now()}
-if(!t.frame)tabFrame(t,t.href);
+if(t.moved&&t.frame&&!tabStreaming(t))dropFrame(t);if(!t.frame)tabFrame(t,t.href);
 if(reader&&reader!==t.frame)reader.removeAttribute('id');for(const x of TABS.list)if(x.frame)x.frame.inert=x!==t;t.frame.id='reader';
 reader=t.frame;TABS.active=t;t.used=Date.now();previewPageLook(t.href);
 if(t.kind&&t.kind!==KIND&&VAULTS[t.kind])switchVault(t.kind,true);
@@ -273,7 +274,8 @@ function saveTabs(){const tabs=[];let active=0;for(const t of TABS.list){const h
 tabs.push({href,src:t.src,folder:t.folder,kind:t===TABS.active?KIND:t.kind,title:t.title})}store(TABS_KEY,JSON.stringify({v:1,active,tabs}))}
 addEventListener('pagehide',saveTabs);
 function tabBusy(t){try{return !!t.frame.contentDocument.querySelector('.askw-panel.open,.askw-panel[aria-busy=true]')}catch(e){return false}}
-function dropFrame(t){t.frame.remove();t.frame=null;t.loaded=false}
+function tabStreaming(t){try{return !!t.frame.contentDocument.querySelector('.askw-panel[aria-busy=true]')}catch(e){return false}}
+function dropFrame(t){t.frame.remove();t.frame=null;t.loaded=false;t.moved=false}
 function evictTabs(){const live=()=>TABS.list.filter(t=>t.frame).length;if(live()<=TAB_LIVE)return;
 for(const t of TABS.list.filter(t=>t.frame&&t!==TABS.active&&t.loaded&&!tabBusy(t)).sort((a,b)=>a.used-b.used)){if(live()<=TAB_LIVE)break;dropFrame(t)}}
 // Run by the shell as it starts (it needs the view switch, set up after this). The frame the server drew is the tab
@@ -287,10 +289,13 @@ if(t0.src){const m=list[at].src===t0.src?at:list.findIndex(t=>t.src===t0.src);if
 else if(KIND==='library'){const x=list[at];Object.assign(t0,{href:x.href,src:x.src,folder:x.folder,title:x.title});list[at]=t0;if(x.kind!==KIND)switchVault(x.kind,true);if(x.href){navigate(x.href);restored=true}}
 else list.splice(++at,0,t0);
 TABS.list=list;drawTabs();return restored}
-// A move or rename in Artifacts (vault_ui's remap): a tab behind on a page that moved keeps its place in the bar and reads
-// the page from its new path when next shown. Its frame goes (unless in use), so no page lives on at a path that is gone.
-function remapTabs(move){for(const t of TABS.list){if(t===TABS.active)continue;const to=move(t.src);if(!to)continue;const hash=t.href.includes('#')?t.href.slice(t.href.indexOf('#')):'';
-t.href=viewHref(to,'html')+hash;t.src=to;if(t.frame&&!tabBusy(t))dropFrame(t)}saveTabs()}
+// A move or rename (vault_ui's remap): a tab behind on a page that moved keeps its place in the bar, the vault it reads
+// in and its heading (movedHref), and reads the page from its new path when next shown. Its frame goes, so no page lives
+// on at a path that is gone: one left there kept showing the old path to the service (live reload, ⌘E). An open answer
+// panel goes with it, its conversation kept in History and moved with the page; only one still being written keeps its
+// frame, and is re-pointed when shown once it is done (activateTab), unless it has gone to another page meanwhile.
+function remapTabs(move){for(const t of TABS.list){if(t===TABS.active)continue;const href=movedHref(t.href,move);if(!href)continue;
+t.href=href;t.src=move(t.src)||t.src;t.folder=move(t.folder)||t.folder;if(!t.frame)continue;if(tabStreaming(t))t.moved=true;else dropFrame(t)}saveTabs()}
 drawTabs();"""
 
 

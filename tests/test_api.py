@@ -1157,6 +1157,13 @@ class HtmlVaultApiTests(unittest.TestCase):
         # Its record in Onyx follows it: Recents name the new path, and it opens where it was left.
         self.assertIsNone(storage.document(str(plan)))
         self.assertEqual(storage.document(str(notes / "Archive" / "Plan.md"))["scroll_y"], 420.0)
+        # An address made before the move — Back, a tab, a link — is sent to where the page went, the rest kept.
+        before = {"src": str(plan), "folder": str(notes)}
+        sent = self.client.get("/view", params=before, follow_redirects=False)
+        self.assertEqual(sent.status_code, 307)
+        self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(sent.headers["location"]).query),
+                         {"src": [str(notes / "Archive" / "Plan.md")], "folder": [str(notes)]})
+        self.assertIn("<h1", self.client.get("/view", params=before).text)
 
         # Nothing goes into, or comes out of, a linked folder: that is another tree's.
         into = self.post("/api/vault/notes/move", {"path": str(index), "dest": "Linked"})
@@ -1173,6 +1180,15 @@ class HtmlVaultApiTests(unittest.TestCase):
         renamed = self.post("/api/vault/notes/rename", {"path": str(notes / "Archive" / "Plan.md"), "name": "Roadmap"}).json()
         self.assertEqual(renamed["path"], str(notes / "Archive" / "Roadmap.md"))
         self.assertEqual(index.read_text(encoding="utf-8"), "[plan](Archive/Roadmap.md) [[Roadmap]]\n")
+        # Followed through every move since; and a page made at the old path since is that page, not a redirect.
+        sent = self.client.get("/view", params=before, follow_redirects=False)
+        self.assertEqual(urllib.parse.parse_qs(urllib.parse.urlsplit(sent.headers["location"]).query)["src"],
+                         [str(notes / "Archive" / "Roadmap.md")])
+        plan.write_text("# A new plan\n", encoding="utf-8")
+        self.assertIn("A new plan", self.client.get("/view", params=before, follow_redirects=False).text)
+        plan.unlink()
+        gone = self.client.get("/view", params={"src": str(notes / "Projects" / "Never.md")}, follow_redirects=False)
+        self.assertNotEqual(gone.status_code, 307)
         self.post("/api/vault/notes/folder", {"parent": "", "name": "Resources"})
         tree = self.client.get("/api/vault/tree", params={"vault": "notes"}).json()["tree"]
         resources = next(c for c in tree["children"] if c["name"] == "Resources")

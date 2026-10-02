@@ -796,16 +796,48 @@ tree.addEventListener('dragend',endDrag);
 function relinked(r){{if(!r)return '';const n=r.updated.length,bits=[];if(r.links)bits.push(`updated ${{r.links}} link${{r.links===1?'':'s'}} in ${{n}} note${{n===1?'':'s'}}`);
 const missed=r.failed.length+r.skipped.length+r.unreadable.length;if(missed)bits.push(`${{missed}} note${{missed===1?'':'s'}} not updated: ${{r.failed.concat(r.skipped,r.unreadable).map(p=>p.split('/').pop().replace(/\.(md|markdown)$/i,'')).join(', ')}}`);return bits.join(' · ')}}
 function placeName(k,dest){{return dest?dest.split('/').join(' › '):k==='html'?'the top level':'the top of '+(GROUPS[k]||'the vault')}}
-async function moveEntry(k,entry,dest){{try{{const d=await postJSON(`/api/vault/${{k}}/move`,{{path:entry,dest}});remap(k,d.from,d.path);if(dest)setOpen(k,rootOf(k)+'/'+dest,true);await loadTree();
-const links=relinked(d.relinked);OnyxMenu.toast('Moved to '+placeName(k,dest)+(links?' · '+links:''),d.relinked&&d.relinked.failed.length+d.relinked.skipped.length+d.relinked.unreadable.length?'bad':'')}}catch(err){{OnyxMenu.toast(err.message||String(err),'bad')}}}}
+// The row lands where it was let go, at once: the tree's own copy moves and is drawn (placeEntry), and the server's
+// tree confirms it, drawn again only if it differs — a refusal puts the row back. Waiting for the server read as a
+// drop that hadn't taken, since a notes move plans its links before it answers (ten seconds on a 685-note vault before
+// relink.py stopped scanning notes that never name what moved), so the row got dragged again. With moves still on
+// their way, only the last one's answer redraws, so an earlier answer never puts a later row back mid-flight.
+let MOVING=0;
+async function moveEntry(k,entry,dest){{if(dest)setOpen(k,rootOf(k)+'/'+dest,true);placeEntry(k,entry,dest);MOVING++;let d=null;
+try{{d=await postJSON(`/api/vault/${{k}}/move`,{{path:entry,dest}});remap(k,d.from,d.path);
+const links=relinked(d.relinked);OnyxMenu.toast('Moved to '+placeName(k,dest)+(links?' · '+links:''),d.relinked&&d.relinked.failed.length+d.relinked.skipped.length+d.relinked.unreadable.length?'bad':'')}}catch(err){{OnyxMenu.toast(err.message||String(err),'bad')}}
+if(!--MOVING)await loadTree()}}
+// Where the server's tree will list it: a pin last among the folder's pins (vault.move_entry carries it), anything
+// else after the pins, folders before notes, by name. Put in place rather than sorting the folder, so a name the two
+// orders disagree on (Python's casefold, not JS's) can't shuffle the rows around it.
+function treeBefore(a,b){{if(!!a.pinned!==!!b.pinned)return !!a.pinned;if(a.pinned)return false;if((a.kind==='dir')!==(b.kind==='dir'))return a.kind==='dir';return (a.title||a.name).toLowerCase()<(b.title||b.name).toLowerCase()}}
+function placeEntry(k,entry,dest){{const d=TREES[k],root=rootOf(k),rel=relOf(entry,k);if(!d||!root||!rel)return;
+const name=rel.slice(rel.lastIndexOf('/')+1),toRel=(dest?dest+'/':'')+name,to=root+'/'+toRel;
+let held=null,from=null,into=dest?null:d.tree;(function walk(n){{for(const c of n.children||[]){{if(c.entry===entry){{held=c;from=n}}if(c.kind==='dir'){{if(dest&&c.rel===dest)into=c;walk(c)}}}}}})(d.tree);
+if(!held||!into||into===from)return;
+const move=mover(entry,to),moveRel=mover(rel,toRel);
+(function shift(n){{n.path=move(n.path)||n.path;if(n.entry)n.entry=move(n.entry)||n.entry;if(n.rel!==undefined)n.rel=moveRel(n.rel)||n.rel;for(const c of n.children||[])shift(c)}})(held);
+from.children.splice(from.children.indexOf(held),1);const at=into.children.findIndex(c=>treeBefore(held,c));into.children.splice(at<0?into.children.length:at,0,held);
+moveFolds(k,move);showTree();const src=move(currentSrc());if(src)highlight(src)}}
 // A move or rename changes the vault path of everything beneath it, so what the shell remembers by path follows: the
 // folders left open or shut, the page each view comes back to, the + panel's destination, the tabs behind (remapTabs), and
 // the page open now (loaded again from its new path, which is how it keeps its link's context).
-function remap(k,from,to){{if(!from||from===to)return;const move=p=>p===from?to:p&&p.startsWith(from+'/')?to+p.slice(from.length):'';
-const view=viewOf(k),f=FOLDS[view];for(const p of [...f]){{const q=move(p);if(q){{f.delete(p);f.add(q)}}}}store(foldKey(view),JSON.stringify([...f]));
+function mover(from,to){{return p=>p===from?to:p&&p.startsWith(from+'/')?to+p.slice(from.length):''}}
+function moveFolds(k,move){{const view=viewOf(k),f=FOLDS[view];for(const p of [...f]){{const q=move(p);if(q){{f.delete(p);f.add(q)}}}}store(foldKey(view),JSON.stringify([...f]))}}
+// What this window has moved or renamed away from. Back or Forward to a page at one of those paths is answered from the
+// browser's cache and never reaches the service, which would send it on (app._moved_page), so the page is loaded again
+// (tabs_ui frameLoaded) and the service decides: where the page went, or whatever sits at that path now.
+const MOVED_FROM=[];
+function leftBehind(src){{return !!src&&MOVED_FROM.some(p=>src===p||src.startsWith(p+'/'))}}
+function remap(k,from,to){{if(!from||from===to)return;MOVED_FROM.push(from);const move=mover(from,to);moveFolds(k,move);
 const lk=keyOf(k)+'last',last=move(recall(lk));if(last)store(lk,last);
 if(k==='html'){{const root=rootOf('html'),dest=recall(DEST_KEY),moved=dest&&move(root+'/'+dest);if(moved)store(DEST_KEY,moved.slice(root.length+1))}}
-remapTabs(move);const src=move(currentSrc());if(src){{let hash='';try{{hash=reader.contentWindow.location.hash}}catch(e){{}}navigate(viewHref(src,k)+hash)}}}}
+remapTabs(move);const href=movedHref(readerPage(),move);if(href){{previewPageLook(href);try{{reader.contentWindow.location.replace(href)}}catch(e){{navigate(href)}}}}}}
+// A page's address once what it reads has moved: its src (and a folder inside what moved) at the new path, the rest —
+// the vault it reads in, the heading it was at — kept; '' if it reads nothing that moved. A conversation it was opened
+// to replay is left off (tabs_ui's savedHref). The page showing takes it with location.replace, so Back never lands on
+// the path that is gone, and a tab behind when next shown (remapTabs).
+function movedHref(href,move){{let u;try{{u=new URL(href,location.origin)}}catch(e){{return ''}}const src=move(u.searchParams.get('src')||'');if(!src)return '';
+u.searchParams.set('src',src);const folder=move(u.searchParams.get('folder')||'');if(folder)u.searchParams.set('folder',folder);u.searchParams.delete('history');u.searchParams.delete('history_action');return u.pathname+u.search+u.hash}}
 // Move To…: the folders of the row's own vault it can go into, with a filter to type into, for a tree too long to drag
 // across. Drawn in the row menu's look; Return moves, Escape (or a click elsewhere) puts it away.
 function folderChoices(k,skip){{const out=[{{rel:'',label:k==='html'?'Top level':GROUPS[k]||'Vault',depth:0}}],d=TREES[k];

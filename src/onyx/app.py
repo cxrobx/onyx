@@ -24,6 +24,7 @@ import asyncio
 import html as html_lib
 import json
 import logging
+import os
 import re
 import secrets
 import sys
@@ -37,7 +38,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, Response, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 
 from .runner import _sse, stream_answer
 from .citations import open_source, reader_target
@@ -74,6 +75,7 @@ MAX_RECENT = 8
 MAX_HISTORY_TURNS = 12
 MAX_HISTORY_TEXT = 4000
 MAX_ASSET_CAPABILITIES = 32
+MAX_MOVED_PAGES = 256  # the sidebar moves this run that /view follows (app.state.moved_pages)
 ASSET_CAPABILITY_TTL = 8 * 60 * 60
 MAX_EDIT_CAPABILITIES = 64
 
@@ -319,6 +321,25 @@ def _search_locate(app: FastAPI, path: str, kind: str) -> str | None:
     return next((name for name in names if app.state.passages.knows(name)), names[0] if names else None)
 
 
+def _moved_page(app: FastAPI, path: Path) -> Path | None:
+    """Where a page that is gone from ``path`` now is, if the sidebar moved it (or a folder above it) this run: newest
+    move first, followed through each later one. None while ``path`` still names something, or when the trail ends
+    nowhere: a file made at the old path since is that file, and the redirect is only ever to a page that exists."""
+    if os.path.lexists(path):
+        return None
+    at, moves = str(vault.normalize(path)), app.state.moved_pages
+    for _ in range(len(moves)):
+        for old, new in reversed(moves):
+            if at == old or at.startswith(old + "/"):
+                at = new + at[len(old):]
+                break
+        else:
+            break
+        if os.path.lexists(at):
+            return Path(at)
+    return None
+
+
 def _register_context_root(app: FastAPI, folder: Path) -> Path | None:
     """Allow ``folder`` as a context root — unless it is the whole disk or home.
 
@@ -422,6 +443,9 @@ def create_app(config: AppConfig) -> FastAPI:
     app.state.recent_folders = [str(config.default_folder)]
     # Per-document expiring capabilities replace the old process-wide asset set.
     app.state.asset_caps = OrderedDict()
+    # Where the sidebar moved or renamed pages this run, oldest first: (old path, new path). /view sends an address made
+    # before a move there — Back, a tab, a link. Replaced whole, never changed in place, so /view reads it unlocked.
+    app.state.moved_pages = ()
     # The editor's: one per note opened for editing (/api/source), naming the one file it may save. Kept apart from
     # the asset capabilities, which expire and are pushed out by the next 32 pages opened, under a note being written.
     app.state.edit_caps = OrderedDict()
@@ -603,6 +627,9 @@ def create_app(config: AppConfig) -> FastAPI:
                         ),
                         status_code=400,
                     )
+                if (now := _moved_page(app, candidate)) is not None:
+                    query = [(k, str(now) if k == "src" else v) for k, v in request.query_params.multi_items()]
+                    return RedirectResponse("/view?" + urllib.parse.urlencode(query), status_code=307)
                 # ``lexical`` is the path as the user sees it (a note under a
                 # symlinked vault folder stays vault-visible); ``path`` is the
                 # realpath used for history, positions, and live reload.
@@ -1561,6 +1588,7 @@ def create_app(config: AppConfig) -> FastAPI:
                 result["relinked"] = relink.apply(one.root, planned)
             if moved != path:
                 app.state.storage.move_source(str(path), str(moved))
+                app.state.moved_pages = (*app.state.moved_pages[-(MAX_MOVED_PAGES - 1):], (str(path), str(moved)))
             return result
 
     async def _vault_edit(request: Request, key: str, edit, *, html_only: bool = False) -> JSONResponse:
