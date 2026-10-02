@@ -18,6 +18,7 @@ SCHEMA_VERSION = 8
 # Extra browser origins allowed to reach /ask and the JSON APIs, beyond the
 # built-in localhost set. The Obsidian plugin's renderer origin is the default.
 MAX_ALLOWED_ORIGINS = 16
+MAX_EXTRA_VAULTS = 8
 _ORIGIN_RE = re.compile(r"^[a-z][a-z0-9+.-]*://[a-z0-9.-]+(:\d{1,5})?$", re.IGNORECASE)
 
 DEFAULT_SETTINGS: dict[str, Any] = {
@@ -48,6 +49,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     # Artifacts: a folder of symlinks to HTML pages anywhere on disk; "" hides it.
     # The key (like kind="html") predates the name: it was "HTML Vault" until 2026-09-11.
     "html_vault_root": str(Path.home() / "Documents" / "Artifacts"),
+    # More notes vaults, listed under Notes after the one above, which stays the primary: the app's look, the phone
+    # mirror and Alfred follow only the primary. Each reads with its own wikilinks and its own context folder.
+    "extra_vault_roots": [],
+    # What ⌘P searches: "primary" (the vault above and Artifacts) or "all" (every vault). The palette can flip it for
+    # one search.
+    "search_scope": "primary",
     "allowed_origins": ["app://obsidian.md"],
     # The Setup section opens by itself on launch until every step passes or this is set.
     "setup_dismissed": False,
@@ -269,7 +276,12 @@ class Storage:
         origins = values.get("allowed_origins")
         if not isinstance(origins, list) or not all(isinstance(item, str) for item in origins):
             values["allowed_origins"] = list(DEFAULT_SETTINGS["allowed_origins"])
-        provider = values.get("provider") if values.get("provider") in {"claude", "codex"} else "claude"
+        extra = values.get("extra_vault_roots")
+        if not isinstance(extra, list) or not all(isinstance(item, str) for item in extra):
+            values["extra_vault_roots"] = []
+        if values.get("search_scope") not in {"primary", "all"}:
+            values["search_scope"] = "primary"
+        provider =values.get("provider") if values.get("provider") in {"claude", "codex"} else "claude"
         values["provider"] = provider
         values["model"] = values[f"{provider}_model"]
         values["reasoning_effort"] = values[f"{provider}_effort"]
@@ -372,6 +384,15 @@ class Storage:
                 # path the user sees, never a resolved realpath.
                 value = os.path.normpath(str(candidate))
             clean[key] = value
+        if "search_scope" in patch:
+            value = str(patch["search_scope"])
+            if value not in {"primary", "all"}:
+                raise ValueError("Search scope must be primary or all.")
+            clean["search_scope"] = value
+        if "extra_vault_roots" in patch:
+            clean["extra_vault_roots"] = self._clean_extra_vaults(
+                patch["extra_vault_roots"], str(clean.get("vault_root", current.get("vault_root")) or "")
+            )
 
         now = time.time()
         with self._lock:
@@ -384,6 +405,36 @@ class Storage:
                 )
             self._db.commit()
         return self.settings(model_default=model_default)
+
+    @staticmethod
+    def _clean_extra_vaults(raw: Any, primary: str) -> list[str]:
+        """The extra notes vaults as folders that exist, lexically normalized (as ``vault_root`` is), each once.
+
+        A vault inside another, or holding one, would list the same notes twice under two vaults' wikilinks, so the
+        primary and the others must each be a folder of their own.
+        """
+        if not isinstance(raw, list):
+            raise ValueError("Other vaults must be a list of folders.")
+        if len(raw) > MAX_EXTRA_VAULTS:
+            raise ValueError(f"At most {MAX_EXTRA_VAULTS} other vaults.")
+        taken = [primary] if primary else []
+        out: list[str] = []
+        for item in raw:
+            value = str(item or "").strip()
+            if not value:
+                continue
+            candidate = Path(value).expanduser()
+            if not candidate.is_absolute() or not candidate.is_dir():
+                raise ValueError(f"{value} does not exist.")
+            value = os.path.normpath(str(candidate))
+            for other in taken:
+                if value == other:
+                    raise ValueError(f"{value} is already a vault." if other in out else "That is the primary vault.")
+                if value.startswith(other.rstrip(os.sep) + os.sep) or other.startswith(value.rstrip(os.sep) + os.sep):
+                    raise ValueError(f"{value} overlaps {other}; vaults can't be inside one another.")
+            taken.append(value)
+            out.append(value)
+        return out
 
     # Obsidian appearance snapshots, one per vault and kind: the reading view
     # (markdown_themes) and the file explorer (sidebar_themes). Each row holds the mode Obsidian was showing

@@ -1047,40 +1047,40 @@ class VaultIndex:
 class VaultCache:
     """Rebuilds each index at most once per ``ttl`` seconds; thread-safe.
 
-    Each kind builds under a lock of its own. A Notes walk can wait on the disk
+    Each vault builds under a lock of its own. A Notes walk can wait on the disk
     for minutes, and with one lock shared by both kinds the Artifacts tree
-    queued behind it: the sidebar sat on "Loading…" after a restart.
+    queued behind it: the sidebar sat on "Loading…" after a restart. The same
+    holds between notes vaults, so the lock and the slot are per (kind, root).
     """
 
     def __init__(self, ttl: float = 5.0) -> None:
         self.ttl = ttl
-        self._building = {kind: threading.Lock() for kind in VAULT_KINDS}
-        # Guards the two fields below and is never held across a build, so
+        # Guards the fields below and is never held across a build, so
         # invalidate(), which the mutation routes call on the event loop, never
         # waits on a walk.
         self._state = threading.Lock()
-        # One slot per vault kind, so switching between Notes and HTML does not
-        # throw the other index away.
-        self._indexes: dict[str, VaultIndex] = {}
+        self._building: dict[tuple[str, Path], threading.Lock] = {}
+        # One slot per vault, so switching between Notes and HTML, or reading
+        # a note in another notes vault, does not throw the other index away.
+        self._indexes: dict[tuple[str, Path], VaultIndex] = {}
         self._generation = 0
 
     def get(self, root: Path, kind: str = "notes") -> VaultIndex:
         root = normalize(root)
-        with self._building[kind]:
+        slot = (kind, root)
+        with self._state:
+            building = self._building.setdefault(slot, threading.Lock())
+        with building:
             with self._state:
-                cached = self._indexes.get(kind)
+                cached = self._indexes.get(slot)
                 generation = self._generation
-            if (
-                cached is not None
-                and cached.root == root
-                and time.time() - cached.built_at < self.ttl
-            ):
+            if cached is not None and time.time() - cached.built_at < self.ttl:
                 return cached
             index = VaultIndex.build(root, kind=kind)
             with self._state:
                 # A walk that began before an invalidate() may predate the change; its caller gets it, the cache doesn't.
                 if generation == self._generation:
-                    self._indexes[kind] = index
+                    self._indexes[slot] = index
             return index
 
     def invalidate(self) -> None:

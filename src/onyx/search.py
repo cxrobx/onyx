@@ -44,6 +44,7 @@ import re
 import sqlite3
 import threading
 import time
+import tomllib
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -55,6 +56,7 @@ from typing import Any, Callable, Sequence
 logger = logging.getLogger("onyx.search")
 
 DEFAULT_INDEX = "~/Projects/vault-mcp/data/index.db"  # vault-mcp's own default (its VAULT_MCP_DB)
+DEFAULT_CONFIGS = "~/.config/vault-mcp"  # where vault-mcp's config files live, one per index (vault_indexes)
 DEFAULT_OLLAMA = "http://localhost:11434"
 DEFAULT_MODEL = "nomic-embed-text"
 # What vault-mcp calls the Artifacts folder in its paths: its default mount, VAULT_MCP_MOUNTS="Artifacts=~/Documents/Artifacts".
@@ -120,6 +122,32 @@ def index_path() -> Path:
 
 def ollama_url() -> str:
     return (os.environ.get("ONYX_OLLAMA") or DEFAULT_OLLAMA).rstrip("/")
+
+
+def vault_indexes(config_dir: Path | str | None = None) -> dict[str, Path]:
+    """vault-mcp's other indexes, by the vault folder each covers: ``{folder, lexically normalised: index file}``.
+
+    vault-mcp keeps one index per config file (its ``VAULT_MCP_CONFIG``). ``config.toml`` is the primary vault's, read
+    through ``index_path``; a vault indexed on its own has a config beside it naming its ``vault`` and its ``db``
+    (``darklabel.toml``). That is how another notes vault in Onyx is searched: by the index already kept for it,
+    rather than by mounting it into the primary's, which every Claude session's ``search_vault`` reads too. A config
+    without a ``db`` writes the primary index, so it names no index of its own here.
+    """
+    directory = Path(config_dir or os.environ.get("ONYX_VAULT_MCP_CONFIGS") or DEFAULT_CONFIGS).expanduser()
+    found: dict[str, Path] = {}
+    try:
+        configs = sorted(directory.glob("*.toml"))
+    except OSError:
+        return found
+    for path in configs:
+        try:
+            data = tomllib.loads(path.read_text(encoding="utf-8"))
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+        folder, db = data.get("vault"), data.get("db")
+        if isinstance(folder, str) and folder.strip() and isinstance(db, str) and db.strip():
+            found.setdefault(os.path.normpath(os.path.expanduser(folder.strip())), Path(db.strip()).expanduser())
+    return found
 
 
 def _short(path: Path) -> str:
@@ -212,6 +240,19 @@ def place(path: str, notes: Any, artifacts: Any) -> dict[str, Any] | None:
                 "folder": item.entry_rel.rpartition("/")[0],
             }
     return None
+
+
+def place_in(tree: Any, vault: str) -> Callable[[str], dict[str, Any] | None]:
+    """``place`` for another notes vault, searched through its own index, which names a note by its path in that
+    vault; ``vault`` is the key its rows carry (``app._Vault.key``)."""
+
+    def place_one(path: str) -> dict[str, Any] | None:
+        item = tree.at(path)
+        if item is None or item.kind != "note" or item.missing:
+            return None
+        return {"vault": vault, "path": str(item.path), "title": item.label, "folder": item.folder}
+
+    return place_one
 
 
 def locate(path: str, kind: str, tree: Any) -> str | None:
@@ -429,19 +470,21 @@ class PassageIndex:
 
     # MARK: the two legs
 
-    def _words(self, data: _Passages, query: str) -> list[int]:
+    def _words(self, data: _Passages, query: str) -> list[tuple[int, float]]:
+        """The words leg: each candidate passage's position with its BM25 rank (lower is better), best first."""
         match = fts_query(query)
         if not match:
             return []
         try:
             with closing(self._connect()) as conn:
                 rows = conn.execute(
-                    "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH ? ORDER BY bm25(chunks_fts, 1.0, 0.5) LIMIT ?",
+                    "SELECT rowid, bm25(chunks_fts, 1.0, 0.5) AS rank FROM chunks_fts WHERE chunks_fts MATCH ? "
+                    "ORDER BY rank LIMIT ?",
                     (match, CANDIDATES),
                 ).fetchall()
         except sqlite3.Error as exc:
             raise Unavailable(f"the vault index has no words to search ({exc})") from exc
-        return [data.pos[row[0]] for row in rows if row[0] in data.pos]
+        return [(data.pos[row[0]], row[1]) for row in rows if row[0] in data.pos]
 
     def _ollama_embed(self, model: str, text: str) -> Sequence[float]:
         body = json.dumps({"model": model, "input": [QUERY_PREFIX + text], "keep_alive": KEEP_ALIVE}).encode()
@@ -489,57 +532,13 @@ class PassageIndex:
         snippet, and how it matched. ``words`` and ``meaning`` say whether each leg could run, and why not.
         ``superseded`` means a newer query came in first and this one was dropped.
         """
+        return search_many([(self, place, "")], query, limit=limit)
+
+    def _begin(self) -> int:
+        """A new palette query: from here on, an older one's meaning scan stops at its next block."""
         query_id = next(self._queries)
         self._latest = query_id
-        words: dict[str, Any] = {"ok": True, "reason": ""}
-        meaning: dict[str, Any] = {"ok": True, "reason": ""}
-        result: dict[str, Any] = {"items": [], "words": words, "meaning": meaning}
-        text = query.strip()
-        try:
-            data = self._passages()
-        except Unavailable as exc:
-            words.update(ok=False, reason=str(exc))
-            meaning.update(ok=False, reason=str(exc))
-            return result
-        by_words: list[int] = []
-        if len(text) >= MIN_WORDS:
-            try:
-                by_words = self._words(data, query)
-            except Unavailable as exc:
-                words.update(ok=False, reason=str(exc))
-        by_meaning: list[int] = []
-        cosine: dict[int, float] = {}
-        if len(text) >= MIN_MEANING and data.vecs:
-            try:
-                by_meaning, cosine = self._meaning(data, self._query_vector(data, text), query_id)
-            except Unavailable as exc:
-                meaning.update(ok=False, reason=str(exc))
-            except _Superseded:
-                result["superseded"] = True
-                return result
-        seen: set[str] = set()
-        for p, how in fuse(by_words, by_meaning, cosine):
-            path = data.paths[p]
-            if path in seen:
-                continue  # a page's later passages: it already has its row, at its best one
-            seen.add(path)
-            row = place(path)
-            if row is None:
-                continue
-            heading, section = sections(data.headings[p], row.get("title", ""))
-            result["items"].append(
-                {
-                    **row,
-                    "heading": heading,
-                    "section": section,
-                    # Found by meaning alone, it holds no word typed worth quoting around: from its start.
-                    "snippet": snippet(data.texts[p], "" if how == "meaning" else text),
-                    "match": how,
-                }
-            )
-            if len(result["items"]) >= limit:
-                break
-        return result
+        return query_id
 
     def related(self, path: str, *, place: Callable[[str], dict[str, Any] | None], limit: int = 20) -> dict[str, Any]:
         """The pages nearest ``path`` in meaning, best first: the neighbours of the page being read.
@@ -681,3 +680,95 @@ class PassageIndex:
             except Unavailable as exc:
                 meaning.update(ok=False, reason=str(exc))
         return {"words": words, "meaning": meaning, "passages": len(data.paths)}
+
+
+def search_many(
+    sources: Sequence[tuple[PassageIndex, Callable[[str], dict[str, Any] | None], str]],
+    query: str,
+    *,
+    limit: int = 12,
+) -> dict[str, Any]:
+    """``PassageIndex.search`` over one index or several at once: one list, best first, each page once.
+
+    ``sources`` are ``(index, place, label)``, the first being the primary vault's: its legs' state is the one reported,
+    as with one index. Another that can't be read is named in ``missing`` (``label: why``) and the rest still answer.
+
+    The legs are pooled before they are fused, so a page ranks against every vault's rather than taking turns with
+    them. Meaning pools exactly, since every index is embedded by the same model and a cosine means the same in each.
+    Words pool by BM25, whose term weights are each index's own, so between vaults it is close rather than exact. With
+    one index both pools are that index's own lists, in their own order, and the result is what one index gives.
+    """
+    ids = [index._begin() for index, _, _ in sources]
+    words: dict[str, Any] = {"ok": True, "reason": ""}
+    meaning: dict[str, Any] = {"ok": True, "reason": ""}
+    result: dict[str, Any] = {"items": [], "words": words, "meaning": meaning}
+    text = query.strip()
+    loaded: dict[int, _Passages] = {}
+    for i, (index, _, label) in enumerate(sources):
+        try:
+            loaded[i] = index._passages()
+        except Unavailable as exc:
+            if i == 0:
+                words.update(ok=False, reason=str(exc))
+                meaning.update(ok=False, reason=str(exc))
+                return result
+            result.setdefault("missing", []).append(f"{label}: {exc}")
+    pooled_words: list[tuple[float, tuple[int, int]]] = []
+    if len(text) >= MIN_WORDS:
+        for i, data in loaded.items():
+            try:
+                pooled_words += [(rank, (i, p)) for p, rank in sources[i][0]._words(data, query)]
+            except Unavailable as exc:
+                if i == 0:
+                    words.update(ok=False, reason=str(exc))
+    # Stable, so one index keeps its own order (and a tie between vaults, the vaults' order).
+    by_words = [key for _, key in sorted(pooled_words, key=lambda hit: hit[0])[:CANDIDATES]]
+    pooled_meaning: list[tuple[float, tuple[int, int]]] = []
+    if len(text) >= MIN_MEANING:
+        vectors: dict[tuple[str, int], array.array] = {}  # one embedding per model, however many indexes use it
+        for i, data in loaded.items():
+            if not data.vecs:
+                continue
+            index = sources[i][0]
+            try:
+                qvec = vectors.get((data.model, data.dim))
+                if qvec is None:
+                    qvec = vectors[(data.model, data.dim)] = index._query_vector(data, text)
+                top, scores = index._meaning(data, qvec, ids[i])
+            except Unavailable as exc:
+                if i == 0:
+                    meaning.update(ok=False, reason=str(exc))
+                elif meaning["ok"]:
+                    result.setdefault("missing", []).append(f"{sources[i][2]}: {exc}")
+                continue
+            except _Superseded:
+                result["superseded"] = True
+                return result
+            pooled_meaning += [(scores[p], (i, p)) for p in top]
+    pooled_meaning.sort(key=lambda hit: -hit[0])
+    by_meaning = [key for _, key in pooled_meaning[:CANDIDATES]]
+    cosine = {key: score for score, key in pooled_meaning[:CANDIDATES]}
+    seen: set[tuple[int, str]] = set()
+    for (i, p), how in fuse(by_words, by_meaning, cosine):
+        data = loaded[i]
+        path = data.paths[p]
+        if (i, path) in seen:
+            continue  # a page's later passages: it already has its row, at its best one
+        seen.add((i, path))
+        row = sources[i][1](path)
+        if row is None:
+            continue
+        heading, section = sections(data.headings[p], row.get("title", ""))
+        result["items"].append(
+            {
+                **row,
+                "heading": heading,
+                "section": section,
+                # Found by meaning alone, it holds no word typed worth quoting around: from its start.
+                "snippet": snippet(data.texts[p], "" if how == "meaning" else text),
+                "match": how,
+            }
+        )
+        if len(result["items"]) >= limit:
+            break
+    return result

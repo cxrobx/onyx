@@ -31,6 +31,7 @@ import time
 import urllib.parse
 import uuid
 from collections import OrderedDict
+from dataclasses import dataclass
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -196,10 +197,107 @@ def _vault_missing_error(app: FastAPI, kind: str) -> str:
     return f"The Artifacts folder does not exist yet: {raw}"
 
 
+@dataclass(frozen=True)
+class _Vault:
+    """One of the vaults the sidebar lists. ``key`` is how routes and the shell name it (``?vault=``): "notes" for the
+    primary notes vault, "html" for Artifacts, and ``v-<folder name>`` for each other notes vault."""
+
+    key: str
+    kind: str  # "notes" | "html": how it is walked and read
+    root: Path
+    label: str
+
+
+def _extra_vaults(app: FastAPI) -> list[_Vault]:
+    """The other notes vaults (``extra_vault_roots``) that exist, in their Settings order, each keyed by its folder name."""
+    config: AppConfig = app.state.config
+    raw_roots = app.state.storage.settings(model_default=config.model).get("extra_vault_roots") or []
+    out: list[_Vault] = []
+    keys = {"notes", "html", "library"}
+    for raw in raw_roots:
+        root = vault.normalize(Path(str(raw)).expanduser())
+        try:
+            if not (root.is_absolute() and root.is_dir()):
+                continue
+        except OSError:
+            continue
+        base = "v-" + (re.sub(r"[^a-z0-9]+", "-", root.name.casefold()).strip("-") or "vault")
+        key, n = base, 2
+        while key in keys:
+            key, n = f"{base}-{n}", n + 1
+        keys.add(key)
+        out.append(_Vault(key, "notes", root, root.name))
+    return out
+
+
+def _notes_vaults(app: FastAPI) -> list[_Vault]:
+    """Every notes vault: the primary first, then the others."""
+    root = _vault_root(app)
+    return ([_Vault("notes", "notes", root, "Notes")] if root is not None else []) + _extra_vaults(app)
+
+
+def _all_vaults(app: FastAPI) -> list[_Vault]:
+    root = _vault_root(app, "html")
+    return _notes_vaults(app) + ([_Vault("html", "html", root, "Artifacts")] if root is not None else [])
+
+
+def _vault_named(app: FastAPI, key: str | None) -> _Vault | None:
+    """A route's ``?vault=``: "html", another notes vault's key, or — anything else, as before there were others — the
+    primary notes vault. None when that vault isn't set up."""
+    if key == "html":
+        root = _vault_root(app, "html")
+        return _Vault("html", "html", root, "Artifacts") if root is not None else None
+    if key and key != "notes":
+        for extra in _extra_vaults(app):
+            if extra.key == key:
+                return extra
+    root = _vault_root(app)
+    return _Vault("notes", "notes", root, "Notes") if root is not None else None
+
+
+def _notes_vault_for(app: FastAPI, path: Path) -> _Vault | None:
+    """The notes vault a page is in, or None: by its path as the reader names it (lexical, links unresolved), or as
+    the realpath a page reports itself by, against a vault folder that is itself reached through a link."""
+    found = None
+    for one in _notes_vaults(app):
+        try:
+            real_root = one.root.resolve()
+        except (OSError, RuntimeError):
+            real_root = one.root
+        inside = vault.is_inside(path, one.root) or vault.is_inside(path, real_root)
+        if inside and (found is None or len(str(one.root)) > len(str(found.root))):
+            found = one
+    return found
+
+
 def _search_places(app: FastAPI):
     """``search.place`` over the two trees as they stand: vault-mcp's path → the row the sidebar lists it as."""
     trees = {kind: app.state.vault.get(root, kind) for kind in ("notes", "html") if (root := _vault_root(app, kind))}
     return lambda path: search.place(path, trees.get("notes"), trees.get("html"))
+
+
+def _passage_index(app: FastAPI, db: Path) -> "search.PassageIndex":
+    """Another notes vault's vault-mcp index, opened once and kept, as the primary's is (``app.state.passages``)."""
+    indexes: dict[Path, search.PassageIndex] = app.state.extra_passages
+    if db not in indexes:
+        indexes[db] = search.PassageIndex(db, ollama=search.ollama_url())
+    return indexes[db]
+
+
+def _search_sources(app: FastAPI, scope: str) -> tuple[list, list[str]]:
+    """What ⌘P searches: the primary index (Notes and Artifacts), and with ``scope`` "all" each other notes vault's
+    own index too. The second list names the vaults that have none, so the palette can say so rather than miss them."""
+    sources: list = [(app.state.passages, _search_places(app), "Notes")]
+    unindexed: list[str] = []
+    extras = _extra_vaults(app) if scope == "all" else []
+    found = search.vault_indexes() if extras else {}
+    for one in extras:
+        db = found.get(str(one.root))
+        if db is None:
+            unindexed.append(f"{one.label}: not in a vault-mcp index")
+            continue
+        sources.append((_passage_index(app, db), search.place_in(app.state.vault.get(one.root), one.key), one.label))
+    return sources, unindexed
 
 
 def _search_locate(app: FastAPI, path: str, kind: str) -> str | None:
@@ -241,9 +339,9 @@ def _register_context_root(app: FastAPI, folder: Path) -> Path | None:
 def _register_vault_root(app: FastAPI) -> None:
     # The vault is browsed through /view with folder=<vault>, so it must also be
     # an allowed context root or the reader's folder seed silently falls back.
-    root = _vault_root(app)
-    if root is not None:
-        app.state.storage.add_root(root)
+    # Each other notes vault reads with itself as context the same way.
+    for one in _notes_vaults(app):
+        app.state.storage.add_root(one.root)
 
 
 def _decode_sse(chunk: str) -> tuple[str | None, dict]:
@@ -315,6 +413,7 @@ def create_app(config: AppConfig) -> FastAPI:
     app.state.vault = vault.VaultCache(ttl=5.0)
     # ⌘P's passages: vault-mcp's index, read where it lies (search.py).
     app.state.passages = search.PassageIndex(search.index_path(), ollama=search.ollama_url())
+    app.state.extra_passages = {}  # another notes vault's own index, by its file (_passage_index)
     if config.first_run:
         first_run.adopt_folders(storage, model_default=config.model)
     _register_vault_root(app)
@@ -516,7 +615,8 @@ def create_app(config: AppConfig) -> FastAPI:
                     context_path = _resolve_folder(app, str(context)) if context else None
                     if context_path is not None:
                         seed = str(context_path)
-                root = _vault_root(app)
+                # The notes vault the page is in, the primary or another: its wikilinks, attachments and look.
+                home = _notes_vault_for(app, lexical)
                 # Taken before the file is read: should it change in between, the page shows newer text than this
                 # names, and a tick made against it is refused rather than landing on a line the page never showed.
                 try:
@@ -524,8 +624,8 @@ def create_app(config: AppConfig) -> FastAPI:
                 except OSError:
                     shown = None
                 index = None
-                if root is not None and vault.is_inside(lexical, root):
-                    index = await asyncio.to_thread(app.state.vault.get, root)
+                if home is not None:
+                    index = await asyncio.to_thread(app.state.vault.get, home.root)
                 loaded = await asyncio.to_thread(
                     viewer.load_local_document,
                     path,
@@ -535,9 +635,10 @@ def create_app(config: AppConfig) -> FastAPI:
                 )
                 html_text = loaded.html
                 if loaded.kind == "markdown":
-                    editing = {"display": str(lexical), "folder": seed, "notes": str(root) if index is not None else None}
+                    editing = {"display": str(lexical), "folder": seed,
+                               "notes": str(home.root) if home is not None and index is not None else None}
                 if loaded.kind in markdown_theme.KINDS:
-                    css = current_markdown_theme()["css"]
+                    css = current_markdown_theme(home.root if home is not None else None)["css"]
                     html_text = html_text.replace(
                         "</head>", f'<style id="askw-markdown-theme">{css}</style></head>', 1
                     )
@@ -595,21 +696,17 @@ def create_app(config: AppConfig) -> FastAPI:
         opens it there and the sidebar can highlight it; ``vault_folder`` is
         the folder it sits in, for saying where it lives.
         """
-        indexes = [
-            (kind, app.state.vault.get(root, kind))
-            for kind in ("notes", "html")
-            if (root := _vault_root(app, kind)) is not None
-        ]
+        indexes = [(one, app.state.vault.get(one.root, one.kind)) for one in _all_vaults(app)]
         for item in items:
             item["vault"] = item["vault_path"] = item["vault_folder"] = None
             source = str(item.get(key) or "")
             if not source.startswith("/"):
                 continue
-            for kind, index in indexes:
+            for one, index in indexes:
                 row = index.by_real(source)
                 if row is not None:
-                    item["vault"], item["vault_path"] = kind, str(row.path)
-                    item["vault_folder"] = row.entry_rel.rpartition("/")[0] if kind == "html" else row.folder
+                    item["vault"], item["vault_path"] = one.key, str(row.path)
+                    item["vault_folder"] = row.entry_rel.rpartition("/")[0] if one.kind == "html" else row.folder
                     break
 
     async def _shell(
@@ -633,17 +730,18 @@ def create_app(config: AppConfig) -> FastAPI:
             found: dict = {"source": src}
             if not viewer.is_remote(src):
                 await asyncio.to_thread(_tag_vaults, [found], "source")
-            notes_root = _vault_root(app)
-            if found.get("vault") == "notes" and notes_root is not None:
-                params = {"src": found["vault_path"], "folder": str(notes_root)}
+            home = _vault_named(app, found["vault"]) if found.get("vault") else None
+            if home is not None and home.kind == "notes":
+                params = {"src": found["vault_path"], "folder": str(home.root)}
             elif found.get("vault") == "html":
                 params = {"src": found["vault_path"]}
             else:
                 params = {"src": src, **({"folder": folder} if folder else {})}
         elif src and (root := _vault_root(app, kind)) is not None:
-            # The Obsidian vault is its own context; a page in Artifacts gets the
-            # real folder behind its link, which /view works out from the path.
-            params = {"src": src} if kind == "html" else {"src": src, "folder": str(root)}
+            # An Obsidian vault is its own context (the one the note is in: the primary or another); a page in
+            # Artifacts gets the real folder behind its link, which /view works out from the path.
+            home = _notes_vault_for(app, vault.normalize(Path(src).expanduser())) if kind != "html" else None
+            params = {"src": src} if kind == "html" else {"src": src, "folder": str(home.root if home else root)}
         reader_query = None
         if params is not None:
             if history:
@@ -660,6 +758,7 @@ def create_app(config: AppConfig) -> FastAPI:
                 kind=kind,
                 sidebar=current_sidebar_theme(),
                 look=current_vault_look(),
+                extra=[{"key": one.key, "label": one.label, "root": str(one.root)} for one in _extra_vaults(app)],
             )
         )
 
@@ -1162,17 +1261,18 @@ def create_app(config: AppConfig) -> FastAPI:
             return denied
         headers = cors(request.headers.get("origin"))
         kind = "html" if vault_kind == "html" else "notes"
-        root = _vault_root(app, kind)
-        if root is None:
+        one = _vault_named(app, vault_kind)
+        if one is None:
             return JSONResponse(
                 {"ok": False, "error": _vault_missing_error(app, kind)}, status_code=400, headers=headers
             )
+        root, kind = one.root, one.kind
         index = await asyncio.to_thread(app.state.vault.get, root, kind)
         return JSONResponse(
             {
                 "ok": True,
                 "root": str(root),
-                "vault": kind,
+                "vault": one.key,
                 "built_at": index.built_at,
                 "files": len([item for item in index.notes if not item.missing]),
                 "missing": len([item for item in index.notes if item.missing]),
@@ -1190,11 +1290,12 @@ def create_app(config: AppConfig) -> FastAPI:
             return denied
         headers = cors(request.headers.get("origin"))
         kind = "html" if vault_kind == "html" else "notes"
-        root = _vault_root(app, kind)
-        if root is None:
+        one = _vault_named(app, vault_kind)
+        if one is None:
             return JSONResponse(
                 {"ok": False, "error": _vault_missing_error(app, kind)}, status_code=400, headers=headers
             )
+        root, kind = one.root, one.kind
         q = q[:200]
         limit = max(1, min(limit, 200))
         index = await asyncio.to_thread(app.state.vault.get, root, kind)
@@ -1220,16 +1321,23 @@ def create_app(config: AppConfig) -> FastAPI:
     # ⌘P's passages (search.py, palette_ui.py): the pages whose words or meaning match, one row each, as the trees list
     # them. The index is vault-mcp's, read-only. The palette asks for the status as it opens, which also warms the
     # index and the embedding model, so the first query typed waits on neither.
+    # ``scope`` is "primary" (the primary notes vault and Artifacts) or "all" (every vault); left out, it is the
+    # search_scope setting. The palette's switch sends it for one search.
     @app.get("/api/search")
-    async def search_api(request: Request, q: str = "", limit: int = 12):
+    async def search_api(request: Request, q: str = "", limit: int = 12, scope: str = ""):
         if denied := api_forbidden(request):
             return denied
         headers = cors(request.headers.get("origin"))
         q = q[:200]
         limit = max(1, min(limit, 40))
-        places = await asyncio.to_thread(_search_places, app)
-        found = await asyncio.to_thread(app.state.passages.search, q, place=places, limit=limit)
-        return JSONResponse({"ok": True, "q": q, **found}, headers=headers)
+        if scope not in ("primary", "all"):
+            scope = app.state.storage.settings(model_default=config.model)["search_scope"]
+        sources, unindexed = await asyncio.to_thread(_search_sources, app, scope)
+        found = await asyncio.to_thread(search.search_many, sources, q, limit=limit)
+        missing = unindexed + found.pop("missing", [])
+        return JSONResponse(
+            {"ok": True, "q": q, "scope": scope, **found, **({"missing": missing} if missing else {})}, headers=headers
+        )
 
     # The related pane (vault_ui.py): the pages nearest the one being read, out of the same index. The client names
     # the page as the reader has it, and the server works out vault-mcp's name for it, so this route can no more reach
@@ -1245,15 +1353,29 @@ def create_app(config: AppConfig) -> FastAPI:
             return denied
         headers = cors(request.headers.get("origin"))
         kind = vault_kind if vault_kind in ("notes", "html") else "notes"
+        limit = max(1, min(limit, 40))
         page = await asyncio.to_thread(_search_locate, app, path, kind)
         if page is None:
+            # A page in another notes vault: its neighbours come from that vault's own index, and from it alone, since
+            # the baseline a related score is taken against is each index's own ("closer than any two pages here").
+            for one in await asyncio.to_thread(_extra_vaults, app):
+                tree = await asyncio.to_thread(app.state.vault.get, one.root)
+                name = search.locate(path, "notes", tree)
+                if name is None:
+                    continue
+                db = (await asyncio.to_thread(search.vault_indexes)).get(str(one.root))
+                if db is None:
+                    return JSONResponse({"ok": True, "items": [], "cut": 0, "note": name,
+                                         "reason": f"{one.label} isn't in a vault-mcp index"}, headers=headers)
+                found = await asyncio.to_thread(
+                    _passage_index(app, db).related, name, place=search.place_in(tree, one.key), limit=limit
+                )
+                return JSONResponse({"ok": True, **found}, headers=headers)
             return JSONResponse(
                 {"ok": True, "items": [], "cut": 0, "reason": "this page isn't in Notes or Artifacts"}, headers=headers
             )
         places = await asyncio.to_thread(_search_places, app)
-        found = await asyncio.to_thread(
-            app.state.passages.related, page, place=places, limit=max(1, min(limit, 40))
-        )
+        found = await asyncio.to_thread(app.state.passages.related, page, place=places, limit=limit)
         return JSONResponse({"ok": True, **found}, headers=headers)
 
     @app.get("/api/search/status")
@@ -1289,12 +1411,12 @@ def create_app(config: AppConfig) -> FastAPI:
             return denied
         headers = cors(request.headers.get("origin"))
         kind = "html" if vault_kind == "html" else "notes"
-        root = _vault_root(app, kind)
-        if root is None:
+        one = _vault_named(app, vault_kind)
+        if one is None:
             return JSONResponse(
                 {"ok": False, "error": _vault_missing_error(app, kind)}, status_code=400, headers=headers
             )
-        paths = await asyncio.to_thread(vault.entry_paths, path, root)
+        paths = await asyncio.to_thread(vault.entry_paths, path, one.root)
         if paths is None:
             return JSONResponse({"ok": False, "error": "That is not in the vault."}, status_code=400, headers=headers)
         return JSONResponse({"ok": True, **paths}, headers=headers)
@@ -1312,10 +1434,10 @@ def create_app(config: AppConfig) -> FastAPI:
         if body.get("token") != config.token:
             return JSONResponse({"ok": False, "error": "invalid token"}, status_code=403)
         kind = "html" if body.get("vault") == "html" else "notes"
-        root = _vault_root(app, kind)
-        if root is None:
+        one = _vault_named(app, str(body.get("vault") or ""))
+        if one is None:
             return JSONResponse({"ok": False, "error": _vault_missing_error(app, kind)}, status_code=400)
-        paths = await asyncio.to_thread(vault.entry_paths, str(body.get("path") or ""), root)
+        paths = await asyncio.to_thread(vault.entry_paths, str(body.get("path") or ""), one.root)
         if paths is None:
             return JSONResponse({"ok": False, "error": "That is not in the vault."}, status_code=400)
         # "link" shows the row from the vault's side; anything else, the real file.
@@ -1518,20 +1640,31 @@ def create_app(config: AppConfig) -> FastAPI:
             headers=cors(request.headers.get("origin")),
         )
 
-    def current_markdown_theme() -> dict:
+    def current_markdown_theme(home: Path | None = None) -> dict:
+        """The reading styles a note wears: those of the vault it is in (``home``) once Obsidian has measured that
+        vault, else the primary's, which is also what every other page Onyx lays out wears."""
         settings = app.state.storage.settings(model_default=config.model)
         root = _vault_root(app)
-        snapshot = vault_mode.snapshots(app.state.storage, root, settings.get("vault_mode"))[0] if root else None
+        snapshot = None
+        if home is not None and home != root:
+            snapshot = vault_mode.snapshots(app.state.storage, home, settings.get("vault_mode"))[0]
+        if snapshot is None:
+            snapshot = vault_mode.snapshots(app.state.storage, root, settings.get("vault_mode"))[0] if root else None
         enabled = bool(settings.get("markdown_follow_obsidian", True))
         css = markdown_theme.stylesheet(snapshot) if enabled else ""
         return {"ok": True, "enabled": enabled, "available": snapshot is not None,
                 "css": css, "revision": markdown_theme.revision(css)}
 
+    # ``src`` is the page asking (ask.js keeps its styles live with this), so a note in another vault keeps that
+    # vault's look rather than being repainted in the primary's.
     @app.get("/api/markdown-theme")
-    async def markdown_theme_api(request: Request):
+    async def markdown_theme_api(request: Request, src: str = ""):
         if denied := api_forbidden(request):
             return denied
-        return JSONResponse(current_markdown_theme(), headers={
+        home = None
+        if src.startswith("/"):
+            home = await asyncio.to_thread(_notes_vault_for, app, vault.normalize(Path(src)))
+        return JSONResponse(current_markdown_theme(home.root if home else None), headers={
             **cors(request.headers.get("origin")), "Cache-Control": "no-store",
         })
 
@@ -1742,8 +1875,26 @@ def create_app(config: AppConfig) -> FastAPI:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         if "vault_root" in patch and settings.get("vault_root"):
             app.state.storage.add_root(Path(str(settings["vault_root"])))
+        if "extra_vault_roots" in patch:
+            for one in _extra_vaults(app):
+                app.state.storage.add_root(one.root)
         app.state.vault.invalidate()
-        return {"ok": True, "settings": settings}
+        return {"ok": True, "settings": settings, "vaults": _vault_list(app)}
+
+    # The vaults the sidebar lists, in order, as the shell names them: it draws a tree for each, and the palette's
+    # switch and the settings dialog read the others from here.
+    def _vault_list(app: FastAPI) -> list[dict]:
+        return [{"key": one.key, "kind": one.kind, "root": str(one.root), "label": one.label}
+                for one in _all_vaults(app)]
+
+    @app.get("/api/vaults")
+    async def vaults_api(request: Request):
+        if denied := api_forbidden(request):
+            return denied
+        settings = app.state.storage.settings(model_default=config.model)
+        return JSONResponse({"ok": True, "vaults": await asyncio.to_thread(_vault_list, app),
+                             "search_scope": settings["search_scope"]},
+                            headers={**cors(request.headers.get("origin")), "Cache-Control": "no-store"})
 
     @app.post("/api/roots")
     async def add_root_api(request: Request):
@@ -1867,12 +2018,11 @@ def create_app(config: AppConfig) -> FastAPI:
         """The reader URL a cited file opens at: its row when a vault lists it, so the sidebar highlights it and it
         reads with that vault's context (as a Finder open does); otherwise the file itself, in the answer's context."""
         params = {"src": str(path), **({"folder": str(context)} if context is not None else {})}
-        for kind in ("notes", "html"):
-            root = _vault_root(app, kind)
-            row = app.state.vault.get(root, kind).by_real(path) if root is not None else None
+        for one in _all_vaults(app):
+            row = app.state.vault.get(one.root, one.kind).by_real(path)
             if row is not None:
                 # As the shell's viewHref reads a row: a note with its vault as the folder, a page with its own.
-                params = {"src": str(row.path), **({"folder": str(root)} if kind == "notes" else {})}
+                params = {"src": str(row.path), **({"folder": str(one.root)} if one.kind == "notes" else {})}
                 break
         return "/view?" + urllib.parse.urlencode(params, quote_via=urllib.parse.quote, safe="/")
 

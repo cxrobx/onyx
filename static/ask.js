@@ -1945,7 +1945,8 @@
     function refresh() {
       if (pending || document.hidden) return;
       pending = true;
-      fetch(SERVER + '/api/markdown-theme', { cache: 'no-store' }).then(function (r) {
+      // Named by the page, so a note in another vault keeps that vault's reading styles (app.py markdown_theme_api).
+      fetch(SERVER + '/api/markdown-theme?src=' + encodeURIComponent(metaSrc()), { cache: 'no-store' }).then(function (r) {
         if (!r.ok) throw new Error('Theme unavailable');
         return r.json();
       }).then(function (theme) {

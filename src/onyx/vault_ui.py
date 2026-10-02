@@ -115,7 +115,10 @@ def vault_page(
     kind: str = "notes",
     sidebar: dict[str, Any] | None = None,
     look: dict[str, Any] | None = None,
+    extra: list[dict[str, Any]] | None = None,
 ) -> str:
+    """``extra`` is the other notes vaults, ``{key, label, root}`` each (app ``_extra_vaults``): Notes lists each
+    under its own heading after the primary's tree, and Library between Notes and Artifacts."""
     kind = kind if kind in VAULT_LABELS else "notes"
     _glass, theme = theme_settings(settings)
     # The vault's Obsidian file-explorer look (sidebar_theme), in force only when it has CSS.
@@ -142,6 +145,8 @@ def vault_page(
     )
     vaults_json = json.dumps(VAULT_LABELS)
     groups_json = json.dumps(GROUP_LABELS)
+    extra_json = json.dumps([{"key": v["key"], "label": v["label"], "root": v["root"]} for v in extra or []]).replace("<", "\\u003c")
+    scope_json = json.dumps((settings or {}).get("search_scope") if (settings or {}).get("search_scope") in ("primary", "all") else "primary")
     icons_json = json.dumps(TREE_ICONS)
     # Library rests on its home page; the vaults on a line saying what to pick.
     home_hidden = "" if kind == "library" and not src else " hidden"
@@ -405,10 +410,17 @@ function readerDragDown(e){{dragDown(e,readerDragAt)}} function readerDragUp(e){
 {glass_js}
 // What each view calls itself; a switch (switchVault, below) moves KIND and everything that hangs off it in place. Library
 // is both vaults at once, each tree under its own heading, so every row says which vault it belongs to (data-vault).
-const VAULTS={vaults_json},GROUPS={groups_json},BOTH=['notes','html']; let HTML,KEY,UNIT,VAULT;
+const VAULTS={vaults_json},GROUPS={groups_json}; let BOTH=['notes','html'],EXTRA=[],HTML,KEY,UNIT,VAULT;
+// The other notes vaults (Settings ▸ Vaults): each a tree of its own, keyed v-<folder>, listed under Notes beneath its own
+// heading and in Library between Notes and Artifacts. BOTH is every tree, in that order. viewOf(k) is the view that
+// shows vault k; shownIn(view) the trees a view shows. SCOPE is what ⌘P searches unless its switch says otherwise.
+let SCOPE={scope_json};
+function setExtra(list){{EXTRA=list.map(v=>v.key);for(const v of list)GROUPS[v.key]=v.label;BOTH=['notes',...EXTRA,'html'];for(const k in TREES)if(!BOTH.includes(k))delete TREES[k]}}
+function viewOf(k){{return k==='html'||k==='library'?k:'notes'}}
+function shownIn(k){{return k==='library'?BOTH:k==='notes'?['notes',...EXTRA]:[k]}}
 function keyOf(k){{return 'askw:vault:'+(k==='notes'?'':k+':')}}
 function setKind(k){{KIND=k;HTML=k==='html';KEY=keyOf(k);VAULT=VAULTS[k];UNIT=VAULT.unit}} setKind(KIND);
-const tree=$('#tree'),filter=$('#vault-filter'),empty=$('#reader-empty'),home=$('#home'),stage=$('#stage'); const TREES={{}};
+const tree=$('#tree'),filter=$('#vault-filter'),empty=$('#reader-empty'),home=$('#home'),stage=$('#stage'); const TREES={{}}; setExtra({extra_json});
 // The reader is the frame of the tab showing (tabs_ui.py): a tab switch moves it, so it is read at the moment it is used.
 let reader=$('#reader');
 // MARK: reader navigation — instant, as in Obsidian: no fade and no wait. What made a page change feel jerky was what
@@ -423,11 +435,11 @@ function store(k,v){{try{{localStorage.setItem(k,v)}}catch(e){{}}}} function rec
 // open, so a project reads at a glance). Library shows those same two trees, and remembers which of its headings is shut.
 const FOLDS={{notes:new Set(),html:new Set(),library:new Set()}};
 function foldKey(k){{return keyOf(k)+(k==='notes'?'open':'closed')}} for(const k in FOLDS){{try{{for(const p of JSON.parse(recall(foldKey(k))||'[]'))FOLDS[k].add(p)}}catch(e){{}}}}
-function isOpen(k,path){{return k==='notes'?FOLDS.notes.has(path):!FOLDS[k].has(path)}}
-function setOpen(k,path,open){{const f=FOLDS[k];if(k==='notes'?open:!open)f.add(path);else f.delete(path);store(foldKey(k),JSON.stringify([...f]))}}
+function isOpen(k,path){{k=viewOf(k);return k==='notes'?FOLDS.notes.has(path):!FOLDS[k].has(path)}}
+function setOpen(k,path,open){{k=viewOf(k);const f=FOLDS[k];if(k==='notes'?open:!open)f.add(path);else f.delete(path);store(foldKey(k),JSON.stringify([...f]))}}
 async function api(url){{const r=await fetch(url);const d=await r.json();if(!r.ok||d.ok===false)throw new Error(d.error||`HTTP ${{r.status}}`);return d}}
 function rootOf(k){{const d=TREES[k];return d&&!d.error?d.root:''}}
-function viewHref(path,k){{const r=k==='notes'&&rootOf('notes');return '/view?src='+encodeURIComponent(path)+(r?'&folder='+encodeURIComponent(r):'')}}
+function viewHref(path,k){{const r=k!=='html'&&rootOf(k);return '/view?src='+encodeURIComponent(path)+(r?'&folder='+encodeURIComponent(r):'')}}
 function ago(ts){{if(!ts)return'';const d=Math.max(0,Date.now()/1000-ts);if(d<3600)return Math.max(1,Math.floor(d/60))+'m';if(d<86400)return Math.floor(d/3600)+'h';if(d<86400*14)return Math.floor(d/86400)+'d';if(d<86400*120)return Math.floor(d/604800)+'w';return new Date(ts*1000).toLocaleDateString(undefined,{{month:'short',year:'2-digit'}})}}
 function label(n,k){{return k==='html'?(n.title||n.name):n.name.replace(/\\.(md|markdown)$/i,'')}} function badge(ext){{return /^\\.(md|markdown)$/i.test(ext)?'':`<span class=ext>${{esc(ext.replace('.',''))}}</span>`}}
 // Rows carry only a label and their vault; what a page is (title, summary, folder, kind, age) waits in NODES for the hover card.
@@ -444,7 +456,7 @@ function render(n,crumbs,k){{return n.kind!=='dir'?fileRow(n,crumbs,k):shows(n,k
 function topRows(k){{return TREES[k].tree.children.filter(c=>shows(c,k)).map(c=>render(c,[],k)).join('')}}
 // Library: each vault under its own heading; a vault not set up says so under its heading rather than vanishing.
 function groupRow(k){{const d=TREES[k];let body='';if(d&&d.error)body=`<li class=none>${{esc(d.error)}} <a href="#settings" data-settings=set-vaults>Open Settings</a></li>`;else if(d)body=topRows(k)||`<li class=none>${{k==='html'?'No artifacts yet.':'No notes found.'}}</li>`;return `<li class=group><details data-group=${{k}}${{isOpen('library',k)?' open':''}}><summary class=group-head><span class=lbl>${{GROUPS[k]}}</span>${{d&&!d.error?`<span class=count>${{d.files}}</span>`:''}}</summary><ul>${{body}}</ul></details></li>`}}
-function renderTree(){{hidePeek();NODES.clear();if(KIND==='library')tree.innerHTML='<ul class=root>'+BOTH.map(groupRow).join('')+'</ul>';else{{const d=TREES[KIND];if(!d||d.error)return;const rows=topRows(KIND);tree.innerHTML=rows?'<ul class=root>'+rows+'</ul>':`<div class=none>${{HTML?'No artifacts yet. Use + to link pages or a folder of them.':'No notes found.'}}</div>`}}
+function renderTree(){{hidePeek();NODES.clear();if(KIND==='library')tree.innerHTML='<ul class=root>'+BOTH.map(groupRow).join('')+'</ul>';else{{const d=TREES[KIND];if(!d||d.error)return;const rows=topRows(KIND)+(KIND==='notes'?EXTRA.filter(k=>TREES[k]).map(groupRow).join(''):'');tree.innerHTML=rows?'<ul class=root>'+rows+'</ul>':`<div class=none>${{HTML?'No artifacts yet. Use + to link pages or a folder of them.':'No notes found.'}}</div>`}}
 tree.querySelectorAll('details').forEach(d=>d.addEventListener('toggle',()=>{{if(d.dataset.group)setOpen('library',d.dataset.group,d.open);else setOpen(d.dataset.vault,d.dataset.path,d.open)}}));highlight(currentSrc());applyTints();if(HTML)fillDestinations()}}
 function currentSrc(){{try{{const l=reader.contentWindow.location;if(!l||!l.href||l.href==='about:blank')return '';return new URLSearchParams(l.search).get('src')||''}}catch(e){{return ''}}}}
 function readerPage(){{try{{const h=reader.contentWindow.location.href;return h&&h!=='about:blank'?h:''}}catch(e){{return ''}}}}
@@ -453,17 +465,17 @@ function highlight(src,block){{tree.querySelectorAll('a.active').forEach(a=>a.cl
 // changes take, asked for by hand and centred: after a Collapse All, or after the filter took the tree somewhere else.
 // It is offered only for a page this tree actually holds. Collapse All leaves Library's two headings open — shutting
 // those would hide both trees rather than fold them — and the rows' own `toggle` listener remembers the result.
-function revealTarget(){{const src=currentSrc();if(!src)return '';const k=vaultOf(src);return k&&(KIND==='library'||k===KIND)?src:''}}
+function revealTarget(){{const src=currentSrc();if(!src)return '';const k=vaultOf(src);return k&&(KIND==='library'||viewOf(k)===KIND)?src:''}}
 function revealCurrent(){{const src=revealTarget();if(!src)return;if(filter.value){{filter.value='';renderTree()}}highlight(src,'center')}}
 function collapsed(){{return !tree.querySelector('details:not([data-group])[open]')}}
 function collapseAll(){{tree.querySelectorAll('details:not([data-group])[open]').forEach(d=>{{d.open=false}})}}
 // Both vaults' trees are kept (TREES), so a switch shows the other at once; each is fetched again behind it, and the
 // list is redrawn only if that brought something new. Library shows the two together.
 async function fetchTree(k){{try{{TREES[k]=await api('/api/vault/tree?vault='+k)}}catch(e){{TREES[k]={{error:e.message}}}}return TREES[k]}}
-function countText(){{if(KIND==='library')return BOTH.map(k=>{{const d=TREES[k];return d&&!d.error?d.files+' '+VAULTS[k].unit+(d.files===1?'':'s'):''}}).filter(Boolean).join(' · ')||'No vaults set up';const d=TREES[KIND];return d.files+' '+UNIT+(d.files===1?'':'s')+(d.missing?' · '+d.missing+' missing':'')+(d.truncated?' (truncated)':'')}}
+function countText(){{if(KIND==='library')return BOTH.map(k=>{{const d=TREES[k];return d&&!d.error?d.files+' '+VAULTS[viewOf(k)].unit+(d.files===1?'':'s')+(EXTRA.includes(k)?' in '+GROUPS[k]:''):''}}).filter(Boolean).join(' · ')||'No vaults set up';const d=TREES[KIND];return d.files+' '+UNIT+(d.files===1?'':'s')+(d.missing?' · '+d.missing+' missing':'')+(d.truncated?' (truncated)':'')+(KIND==='notes'?EXTRA.map(k=>{{const x=TREES[k];return x&&!x.error?' · '+x.files+' in '+GROUPS[k]:''}}).join(''):'')}}
 function showTree(){{if(KIND!=='library'){{const d=TREES[KIND];if(!d)return;if(d.error){{tree.innerHTML=`<div class=none>${{esc(d.error)}} <a href="#settings" data-settings=set-vaults>Open Settings</a></div>`;$('#vault-count').textContent=HTML?'no Artifacts folder':'no vault';return}}}}$('#vault-count').textContent=countText();renderTree()}}
 function sameTree(a,b){{return !!a&&!!b&&a.error===b.error&&a.files===b.files&&a.missing===b.missing&&a.truncated===b.truncated&&JSON.stringify(a.tree)===JSON.stringify(b.tree)}}
-async function loadTree(){{const k=KIND,ks=k==='library'?BOTH:[k],was=ks.map(x=>TREES[x]),got=await Promise.all(ks.map(fetchTree));if(k===KIND&&got.some((d,i)=>!sameTree(was[i],d)))showTree()}}
+async function loadTree(){{const k=KIND,ks=shownIn(k),was=ks.map(x=>TREES[x]),got=await Promise.all(ks.map(fetchTree));if(k===KIND&&got.some((d,i)=>!sameTree(was[i],d)))showTree()}}
 // After a vault folder changes in Settings: both trees again, and the home page, whose tags come from them.
 async function reloadTrees(){{await Promise.all(BOTH.map(fetchTree));showTree();if(!home.hidden)loadHome()}}
 // The vault a page lives in: the one whose root it sits under (the deeper, should one hold the other); '' for neither.
@@ -668,7 +680,7 @@ relList.innerHTML=items.map((r,i)=>`<button class=rel-row type=button data-i=${{
 +`<span class=rel-where>${{esc(relWhere(r))}}</span></button>`).join('')}}
 function relMark(i){{for(const el of relPane.querySelectorAll('.on'))el.classList.remove('on');if(i<0)return;
 const row=relList.querySelector(`.rel-row[data-i="${{i}}"]`);if(row)row.classList.add('on');for(const el of relMap.querySelectorAll(`[data-i="${{i}}"]`))el.classList.add('on')}}
-function relOpen(r,inTab){{if(!r)return;const k=KIND!=='library'&&r.vault!==KIND?r.vault:KIND;if(inTab){{openTab(viewHref(r.path,r.vault),{{kind:k}});return}}if(k!==KIND)switchVault(k,true);if(currentSrc()!==r.path)navigate(viewHref(r.path,r.vault))}}
+function relOpen(r,inTab){{if(!r)return;const k=KIND!=='library'&&viewOf(r.vault)!==KIND?viewOf(r.vault):KIND;if(inTab){{openTab(viewHref(r.path,r.vault),{{kind:k}});return}}if(k!==KIND)switchVault(k,true);if(currentSrc()!==r.path)navigate(viewHref(r.path,r.vault))}}
 relList.addEventListener('mousemove',e=>{{const b=e.target.closest('.rel-row');relMark(b?+b.dataset.i:-1)}});
 relMap.addEventListener('mousemove',e=>{{const c=e.target.closest('.rel-dot');relMark(c?+c.dataset.i:-1)}});
 relPane.addEventListener('mouseleave',()=>relMark(-1));
@@ -690,7 +702,7 @@ const READER_HOOKS=[]; function onReaderLoad(fn){{READER_HOOKS.push(fn)}}
 function readerLoaded(){{readerFollow();for(const fn of READER_HOOKS)try{{fn()}}catch(e){{setTimeout(()=>{{throw e}})}}}}
 if(native)onReaderLoad(()=>{{try{{const w=reader.contentWindow;w.addEventListener('mousedown',readerDragDown,true);w.addEventListener('mouseup',readerDragUp,true)}}catch(e){{}}}});
 function readerFollow(){{try{{reader.contentWindow.addEventListener('keydown',sideKey)}}catch(e){{}}syncOverlays();outlineLoaded();const src=currentSrc();if(!src){{if(!readerPage()){{history.replaceState(null,'',shellUrl(KIND,''));document.title=VAULT.name}}return}}
-const k=vaultOf(src);if(k&&KIND!=='library'&&k!==KIND&&traversed())switchVault(k,true);highlight(src);history.replaceState(null,'',shellUrl(KIND,src,KIND==='library'&&!k?readerFolder():''));let t='';try{{t=reader.contentDocument.title}}catch(e){{}}document.title=(t||src.split('/').pop())+' — '+VAULT.name;rememberLast(src)}}
+const k=vaultOf(src);if(k&&KIND!=='library'&&viewOf(k)!==KIND&&traversed())switchVault(viewOf(k),true);highlight(src);history.replaceState(null,'',shellUrl(KIND,src,KIND==='library'&&!k?readerFolder():''));let t='';try{{t=reader.contentDocument.title}}catch(e){{}}document.title=(t||src.split('/').pop())+' — '+VAULT.name;rememberLast(src)}}
 {tabs_js}
 // The page a vault shows is its last page, the one a switch back brings up. The page the shell opened on can load before
 // its tree does (the two race, a few ms apart), when `vaultOf` can't yet say whose it is: the trees' arrival asks again.
@@ -700,11 +712,11 @@ function rememberLast(src){{const k=vaultOf(src);if(k)store(keyOf(k)+'last',src)
 function itemHref(item,action){{const src=item.source||item.document_source||'',p=new URLSearchParams();let base='/view';
 if(src.startsWith('service://selection/')){{base='/quick';p.set('text',item.selection||'');if(item.folder)p.set('folder',item.folder)}}else{{p.set('src',item.vault_path||src);const folder=item.vault==='notes'?(rootOf('notes')||item.folder):item.vault==='html'?'':item.folder;if(folder)p.set('folder',folder)}}
 if(action){{p.set('history',item.request_id);p.set('history_action',action)}}return base+'?'+p}}
-function openItem(item,action,inTab){{const k=KIND!=='library'&&(item.vault||'')!==KIND?'library':KIND;if(inTab){{openTab(itemHref(item,action),{{kind:k}});return}}if(k!==KIND)switchVault(k,true);navigate(itemHref(item,action))}}
+function openItem(item,action,inTab){{const k=KIND!=='library'&&(item.vault?viewOf(item.vault):'')!==KIND?'library':KIND;if(inTab){{openTab(itemHref(item,action),{{kind:k}});return}}if(k!==KIND)switchVault(k,true);navigate(itemHref(item,action))}}
 let filterTimer; filter.oninput=()=>{{clearTimeout(filterTimer);filterTimer=setTimeout(applyFilter,150)}};
-async function applyFilter(){{const q=filter.value.trim(),k=KIND;if(q.length<2){{renderTree();return}}const lib=k==='library',kinds=lib?BOTH.filter(rootOf):[k];
+async function applyFilter(){{const q=filter.value.trim(),k=KIND;if(q.length<2){{renderTree();return}}const lib=k==='library',kinds=shownIn(k).filter(rootOf);
 try{{const found=await Promise.all(kinds.map(vk=>api('/api/vault/search?vault='+vk+'&q='+encodeURIComponent(q)+(lib?'&limit=25':'')).then(d=>d.items.map(i=>({{...i,k:vk}})))));if(k!==KIND)return;const items=found.flat();hidePeek();NODES.clear();items.forEach(i=>NODES.set(i.path,{{n:i,crumbs:(i.folder||'').split('/').filter(Boolean),k:i.k}}));
-tree.innerHTML='<ul class="root results">'+items.map(i=>`<li><a class=file target=reader href="${{esc(viewHref(i.path,i.k))}}" data-path="${{esc(i.path)}}" data-vault=${{i.k}}><span class=lbl>${{esc(i.k==='html'?(i.title||i.name):label(i,i.k))}}</span><small>${{esc(lib?GROUPS[i.k]+(i.folder?' › '+i.folder:''):(i.folder||'/'))}}</small></a></li>`).join('')+(items.length?'':`<li class=none>${{lib?'Nothing matches.':'No '+UNIT+'s match.'}}</li>`)+'</ul>';highlight(currentSrc())}}catch(e){{if(k===KIND)tree.innerHTML=`<div class=none>${{esc(e.message)}}</div>`}}}}
+tree.innerHTML='<ul class="root results">'+items.map(i=>`<li><a class=file target=reader href="${{esc(viewHref(i.path,i.k))}}" data-path="${{esc(i.path)}}" data-vault=${{i.k}}><span class=lbl>${{esc(i.k==='html'?(i.title||i.name):label(i,i.k))}}</span><small>${{esc(lib||i.k!==k?GROUPS[i.k]+(i.folder?' › '+i.folder:''):(i.folder||'/'))}}</small></a></li>`).join('')+(items.length?'':`<li class=none>${{lib?'Nothing matches.':'No '+UNIT+'s match.'}}</li>`)+'</ul>';highlight(currentSrc())}}catch(e){{if(k===KIND)tree.innerHTML=`<div class=none>${{esc(e.message)}}</div>`}}}}
 document.addEventListener('keydown',e=>{{const typing=/^(INPUT|SELECT|TEXTAREA)$/.test(document.activeElement&&document.activeElement.tagName);if(e.key==='/'&&!typing&&!e.metaKey&&!e.ctrlKey&&!pageOnly()){{e.preventDefault();if(!pinned())sideOut(true);filter.focus();filter.select()}}else if(e.key==='Escape'&&document.activeElement===filter){{filter.value='';applyFilter();filter.blur()}}}});
 // MARK: row menu — the app's rendered menu (static/app-menu.js). The server says what a row really is (its real file, and
 // the link on the way); ⌥ turns each Reveal into a Copy. A mousedown while the answer is in flight means it came too late.
@@ -797,7 +809,8 @@ nameInPlace(li.querySelector('.lbl'),'',async name=>{{await postJSON('/api/vault
 // since its folder names never match the vault's. Kept live, like the reader's Markdown styles.
 let SIDE_THEME={sidebar_state};
 function applyTints(){{const on=document.body.classList.contains('obsidian-tree'),list=SIDE_THEME.folders||[],byName=new Map(list.map(f=>[f.name.toLowerCase(),f]));
-const tops=KIND==='library'?BOTH.map(k=>[k,tree.querySelectorAll(`:scope > ul.root > li.group > details[data-group=${{k}}] > ul > li > details`)]):[[KIND,tree.querySelectorAll(':scope > ul.root > li > details')]];
+const grouped=k=>[k,tree.querySelectorAll(`:scope > ul.root > li.group > details[data-group=${{k}}] > ul > li > details`)];
+const tops=KIND==='library'?BOTH.map(grouped):[[KIND,tree.querySelectorAll(':scope > ul.root > li:not(.group) > details')]].concat(KIND==='notes'?EXTRA.map(grouped):[]);
 for(const [k,rows] of tops)rows.forEach((d,i)=>{{const li=d.parentElement,name=(d.querySelector(':scope > summary .lbl')||{{}}).textContent||'';
 const f=on&&list.length?((k==='notes'&&byName.get(name.toLowerCase()))||list[i%list.length]):null;
 for(const [prop,value] of [['--folder-color',f&&f.color],['--guide-color',f&&(f.guide||f.color)],['--folder-hover',f&&f.hover]]){{if(value)li.style.setProperty(prop,value);else li.style.removeProperty(prop)}}}})}}
@@ -834,7 +847,7 @@ function updated(ts){{const a=ago(ts);return !a?'':/\\d[mhdw]$/.test(a)?'Updated
 function kindOf(n,k){{if(k==='html')return 'HTML page';const x=(n.ext||(/\\.[^.]+$/.exec(n.name||'')||[''])[0]).replace('.','').toUpperCase();return /^(MD|MARKDOWN)$/.test(x)?'Markdown note':x?x+' file':'Note'}}
 function showPeek(row){{const e=NODES.get(row.dataset.path);if(!e||(window.OnyxMenu&&OnyxMenu.isOpen()))return;const n=e.n;
 if(peekRow&&peekRow!==row)peekRow.removeAttribute('aria-describedby');peekRow=row;row.setAttribute('aria-describedby','peek');
-const where=(KIND==='library'?[GROUPS[e.k]]:[]).concat(e.crumbs).join(' › ')||VAULTS[e.k].name,what=n.missing?'Link target is missing: '+shortPath(n.target||n.name):[kindOf(n,e.k),updated(n.mtime)].filter(Boolean).join(' · ');
+const where=(KIND==='library'||e.k!==KIND?[GROUPS[e.k]]:[]).concat(e.crumbs).join(' › ')||VAULTS[viewOf(e.k)].name,what=n.missing?'Link target is missing: '+shortPath(n.target||n.name):[kindOf(n,e.k),updated(n.mtime)].filter(Boolean).join(' · ');
 peek.innerHTML=`<p class=peek-title>${{esc(label(n,e.k))}}</p>${{n.summary?`<p class=peek-sum>${{esc(n.summary)}}</p>`:''}}<p class=peek-row>${{ICON.folder}}<span>${{esc(where)}}</span></p><p class=peek-row>${{n.missing?ICON.link:ICON.doc}}<span>${{esc(what)}}</span></p>`;
 peek.hidden=false;const r=row.getBoundingClientRect(),side=$('#vault-side').getBoundingClientRect(),w=peek.offsetWidth,h=peek.offsetHeight,beside=side.right+10+w<=innerWidth-8;
 peek.style.left=(beside?side.right+10:Math.max(8,Math.min(r.left,innerWidth-w-8)))+'px';peek.style.top=Math.max(8,Math.min(beside?r.top-4:r.bottom+6,innerHeight-h-8))+'px';requestAnimationFrame(()=>peek.classList.add('show'))}}
@@ -888,7 +901,7 @@ setKind(k);document.body.classList.remove('kind-library','kind-notes','kind-html
 for(const a of switchLinks){{const on=a.dataset.kind===k;a.classList.toggle('active',on);if(on)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}}
 $('.brand-name').textContent=VAULT.name;filter.placeholder='Filter '+VAULT.units+'… (press /)';filter.setAttribute('aria-label','Filter '+VAULT.units);tree.setAttribute('aria-label',VAULT.tree);$('#empty-hint').textContent=VAULT.empty;
 $('#add-panel').hidden=true;$('#add-toggle').setAttribute('aria-expanded','false');
-const cached=(k==='library'?BOTH:[k]).every(x=>TREES[x]);if(cached){{showTree();tree.scrollTop=treeScroll[k]||0;highlight(currentSrc())}}else tree.innerHTML='<div class=none>Loading…</div>';
+const cached=shownIn(k).every(x=>TREES[x]);if(cached){{showTree();tree.scrollTop=treeScroll[k]||0;highlight(currentSrc())}}else tree.innerHTML='<div class=none>Loading…</div>';
 document.body.classList.add('kind-still');requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.remove('kind-still')));
 const fresh=loadTree();if(follow){{syncOverlays();return}}if(k==='library'){{goHome();return}}
 home.hidden=true;history.replaceState(null,'',shellUrl(k,''));document.title=VAULT.name;
@@ -929,7 +942,7 @@ document.body.classList.add('outline-still');setPane(relOn);applyOutlinePin();re
 const RESTORED=restoreTabs();
 // Both trees load up front: Library draws them together, and the first switch is as instant as the rest.
 const FIRST=KIND; if(FIRST==='library'&&!INITIAL_SRC&&!RESTORED)loadHome();
-(FIRST==='library'?loadTree():fetchTree(FIRST).then(()=>{{if(KIND===FIRST)showTree()}})).then(()=>{{for(const k of BOTH)if(!TREES[k])fetchTree(k);{{const s=currentSrc();if(s){{rememberLast(s);highlight(s)}}}}if(KIND!==FIRST||FIRST==='library'||INITIAL_SRC||RESTORED||!rootOf(FIRST))return;const last=recall(KEY+'last');if(last)navigate(viewHref(last,FIRST))}});
+(FIRST==='library'?loadTree():fetchTree(FIRST).then(()=>{{if(KIND===FIRST)showTree()}})).then(()=>{{for(const k of BOTH)if(!TREES[k])fetchTree(k).then(()=>{{if(KIND!=='library'&&shownIn(KIND).includes(k))showTree()}});{{const s=currentSrc();if(s){{rememberLast(s);highlight(s)}}}}if(KIND!==FIRST||FIRST==='library'||INITIAL_SRC||RESTORED||!rootOf(FIRST))return;const last=recall(KEY+'last');if(last)navigate(viewHref(last,FIRST))}});
 previewPageLook(reader.src);syncAppearance();
 // A fragment names a dialog to open: #settings, #diagnostics, #history — which is where the old launcher's links land.
 {{const h=location.hash.slice(1);if(/^(settings|diagnostics|history)$/.test(h)){{history.replaceState(null,'',location.pathname+location.search);if(h==='history')PANELS.openHistory();else PANELS.openSettings(h==='diagnostics'?'diagnostics':'')}}else PANELS.maybeSetup()}}
