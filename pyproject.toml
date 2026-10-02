@@ -1,6 +1,6 @@
 [project]
 name = "onyx"
-version = "0.6.5"
+version = "0.6.6"
 description = "Highlight-to-ask reading companion with subscription-backed Claude and Codex CLI providers."
 readme = "README.md"
 license = "BUSL-1.1"
