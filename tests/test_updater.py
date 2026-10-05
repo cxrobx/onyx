@@ -79,6 +79,13 @@ class UpdaterConfigTests(unittest.TestCase):
             ).stdout.splitlines()
             self.assertEqual([path for path in tracked if "Sparkle.framework" in path], [])
 
+    def test_the_install_owns_the_app_as_the_user_so_sparkle_needs_no_password(self) -> None:
+        # Sparkle asks for admin rights when it can't give a file the installed app's owner and group;
+        # an install from a /private/tmp export carried group wheel and every update then failed.
+        build = (LAUNCHER / "build-app.sh").read_text(encoding="utf-8")
+        install = build[build.index('DEST="/Applications/$APP_NAME.app"') :]
+        self.assertIn('chown -R "$(id -un):$(id -gn)" "$DEST"', install)
+
     def test_the_build_embeds_and_signs_sparkle_inside_out(self) -> None:
         build = (LAUNCHER / "build-app.sh").read_text(encoding="utf-8")
         release = build[build.index('echo "→ Signing…"') : build.index("else\n  # macOS keeps a permission")]

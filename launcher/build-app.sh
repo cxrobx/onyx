@@ -241,6 +241,10 @@ if ! mv "$STAGED" "$DEST"; then
   exit 1
 fi
 rm -rf "$BACKUP"
+# Own it as the user's primary group. A build run from a HEAD export under /private/tmp carries that
+# directory's group, wheel, into /Applications, and Sparkle then can't give its staged copy the same
+# group, decides it needs an admin password, and fails with "An error occurred while launching the installer".
+chown -R "$(id -un):$(id -gn)" "$DEST"
 # Clear the quarantine flag so it opens without the unidentified-developer prompt.
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
 # The transparent gem, as the installed app's custom icon. The app sets it itself at launch
