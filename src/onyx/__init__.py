@@ -5,4 +5,4 @@ Claude or Codex CLI in read-only mode so answers can use a trusted local context
 folder without API keys.
 """
 
-__version__ = "0.6.8"
+__version__ = "0.6.9"
