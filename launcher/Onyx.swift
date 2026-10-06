@@ -1444,7 +1444,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
             case "0":
                 self.resetZoom()
             case "w":
-                // ⌘W hides Onyx, like ⌘H. ⇧⌘W arrives as "W" and still closes the window.
+                // ⌘W hides Onyx, like ⌘H. ⇧⌘W arrives as "W" and reaches File ▸ Close Tab.
                 NSApp.hide(nil)
             default:
                 return event
@@ -1475,7 +1475,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     @objc private func newTab() { shellCall("onyxShell.newTab()", fallback: "/") }
     @objc private func nextTab() { onShell("onyxShell.nextTab()") }
     @objc private func previousTab() { onShell("onyxShell.prevTab()") }
-    /// File ▸ Close Tab (no shortcut: ⌘W hides Onyx, like ⌘H). The shell answers false for its lone home tab, and
+    /// File ▸ Close Tab (⇧⌘W; ⌘W hides Onyx, like ⌘H). The shell answers false for its lone home tab, and
     /// off the shell there are no tabs: then it closes the window. A panel or alert that is key closes itself instead.
     @objc private func closeTab() {
         guard let webView, NSApp.keyWindow == nil || NSApp.keyWindow === window,
@@ -1644,10 +1644,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         fileMenu.addItem(.separator())
         fileMenu.addItem(menuItem("Recent Conversations", #selector(openRecentConversations), "y"))
         fileMenu.addItem(.separator())
-        fileMenu.addItem(menuItem("Close Tab", #selector(closeTab), ""))
-        fileMenu.addItem(NSMenuItem(
-            title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "W"
-        ))
+        fileMenu.addItem(menuItem("Close Tab", #selector(closeTab), "W"))
+        let closeWindow = NSMenuItem(
+            title: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w"
+        )
+        closeWindow.keyEquivalentModifierMask = [.command, .option]
+        fileMenu.addItem(closeWindow)
 
         let editItem = NSMenuItem()
         main.addItem(editItem)
