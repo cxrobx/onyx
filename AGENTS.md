@@ -115,6 +115,19 @@ Rename never edits its file or target: the name lives in the folder's
 `test_an_edit_made_after_the_plan_is_never_overwritten`,
 `test_notes_in_a_linked_folder_are_reported_not_written`
 
+**An Artifacts link follows its page when the page moves outside Onyx.** Before
+each Artifacts walk, `link_repair.sweep` (the `VaultCache.prepare` hook) records
+every working link's target by its file identity (device + inode) in `onyx.db`,
+never beside the links: an inode means nothing on another Mac the folder is
+copied or synced to. A broken link is re-aimed (`vault.point_link`, atomic, the
+link's name and place kept) only when `/.vol` finds that identity as the same
+kind, outside Artifacts and not in the Trash; anything less certain is a guess
+(`link_repair.candidates`: same name nearby or in Spotlight) that the row menu
+offers and links only when chosen. A failing sweep logs and never fails the
+listing.
+→ `tests/test_link_repair.py`,
+`test_a_missing_artifact_is_offered_where_its_page_went` (browser suite)
+
 **The phone mirror is inert, fenced and sealed.** `src/onyx/mirror/` publishes an
 encrypted, read-only copy of the vault for a phone (`docs/plans/phone-mirror.md`,
 whose "Wire format v1" the Mac, the Worker in `integrations/mirror-worker/` and the

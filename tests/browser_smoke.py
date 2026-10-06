@@ -4832,6 +4832,50 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_a_missing_artifact_is_offered_where_its_page_went(self) -> None:
+        # The failure class: Artifacts is a folder of links, and a page moved in Finder left its link pointing at
+        # nothing. One recorded beforehand is repaired by the listing itself (tests/test_link_repair.py); one that broke
+        # before that is shown missing, and its row menu offers the page of that name it found, and links it on a click.
+        artifacts = self._tab_pages()
+        name = "onyx-relink-smoke-7f3a.html"  # unique, so Spotlight finds nothing of the same name on this Mac
+        was = self.root / "elsewhere" / name
+        went = self.root / "elsewhere" / "Archive" / name
+        went.parent.mkdir(parents=True)
+        went.write_text("<title>Moved page</title><h1>Moved page</h1>", encoding="utf-8")
+        link = artifacts / "Pages" / name
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    if os.path.lexists(link):
+                        link.unlink()
+                    link.symlink_to(was)  # never worked here, so nothing was recorded: the guess's case
+                    # The engine before relinked it, which recorded the page; with that record the listing would repair
+                    # the link by itself, so forget it.
+                    self.app.state.storage.remember_link_targets({}, [str(link)])
+                    self.app.state.vault.invalidate()
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/vault?vault=html", wait_until="networkidle")
+                    row = page.locator("#tree .file.missing")
+                    expect(row).to_have_count(1)
+                    row.click(button="right")
+                    menu = page.locator(".onyx-menu")
+                    shown = "Relink to " + str(went).replace(str(Path.home()), "~", 1)
+                    relink = menu.get_by_role("menuitem", name=shown, exact=True)
+                    expect(relink).to_have_count(1)
+                    # The picker is the app's; served to a browser there is none to offer.
+                    expect(menu.get_by_role("menuitem", name="Choose New Location…")).to_have_count(0)
+                    relink.click()
+                    expect(page.locator(".onyx-toast")).to_contain_text("Relinked to")
+                    expect(page.locator("#tree .file.missing")).to_have_count(0)
+                    expect(page.locator("#tree a.file", has_text="Moved page")).to_have_count(1)
+                    self.assertEqual(os.readlink(link), str(went))
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_tabs_come_back_as_stubs_hold_six_frames_and_follow_a_rename(self) -> None:
         # The tabs outlive a reload and a relaunch. Only the tab showing gets a frame; the rest are stubs until shown,
         # when their page comes back where it was read. No more than six frames stay alive, never dropping one whose

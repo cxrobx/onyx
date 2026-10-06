@@ -47,7 +47,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from . import viewer
 
@@ -288,13 +288,8 @@ def create_folder(root: Path | str, parent_rel: str, name: str, label: str = "Ar
     return folder
 
 
-def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str | None = None) -> Path:
-    """Link an HTML file or a folder into Artifacts. Never touches ``target``.
-
-    A linked ``index.html`` is named after its folder, since every guide would
-    otherwise arrive as ``index.html`` and collide with the last one.
-    """
-    folder = writable_folder(root, parent_rel)
+def link_source(root: Path | str, target: Path | str) -> Path:
+    """``target`` as something Artifacts can link to — an HTML file or a folder outside it — else ValueError."""
     raw = str(target or "").strip()
     if raw.lower().startswith("file://"):
         from urllib.parse import unquote, urlparse
@@ -303,17 +298,10 @@ def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str
     source = normalize(Path(raw).expanduser())
     if not source.is_absolute():
         raise ValueError("Give the full path of the HTML file or folder.")
-    if source.is_dir():
-        default = source.name
-    elif source.is_file():
+    if source.is_file():
         if source.suffix.lower() not in HTML_EXTENSIONS:
             raise ValueError("Only HTML files (.html, .htm) or folders can be linked.")
-        default = (
-            f"{source.parent.name}{source.suffix.lower()}"
-            if source.name.lower() in INDEX_NAMES and source.parent.name
-            else source.name
-        )
-    else:
+    elif not source.is_dir():
         raise ValueError("That file or folder does not exist.")
     real_vault = Path(os.path.realpath(normalize(root)))
     real_source = Path(os.path.realpath(source))
@@ -321,6 +309,46 @@ def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str
         raise ValueError("That is already inside Artifacts.")
     if real_vault.is_relative_to(real_source):
         raise ValueError("That folder contains the Artifacts folder itself, so linking it would loop.")
+    return source
+
+
+def point_link(link: Path, target: Path | str) -> None:
+    """Re-aim the symlink ``link`` at ``target`` in one step: a new link made beside it replaces it, so the entry is
+    never absent and its name, pins and display name stay as they were. Never touches either target."""
+    staged = link.with_name(f".{link.name}.onyx-link")
+    if os.path.lexists(staged):
+        staged.unlink()
+    os.symlink(str(target), str(staged), target_is_directory=os.path.isdir(target))
+    os.replace(staged, link)
+
+
+def retarget_link(root: Path | str, path: Path | str, target: Path | str) -> Path:
+    """Point an Artifacts link the vault owns at ``target`` instead — the fix for a page whose file moved. The link keeps
+    its name and place; ``target`` must be something ``create_link`` would link. Returns the target linked."""
+    entry = owned_entry(root, path)
+    if not os.path.islink(entry):
+        raise ValueError(f"“{entry.name}” is a folder of Artifacts' own, not a link.")
+    source = link_source(root, target)
+    point_link(entry, source)
+    return source
+
+
+def create_link(root: Path | str, parent_rel: str, target: Path | str, name: str | None = None) -> Path:
+    """Link an HTML file or a folder into Artifacts. Never touches ``target``.
+
+    A linked ``index.html`` is named after its folder, since every guide would
+    otherwise arrive as ``index.html`` and collide with the last one.
+    """
+    folder = writable_folder(root, parent_rel)
+    source = link_source(root, target)
+    if source.is_dir():
+        default = source.name
+    else:
+        default = (
+            f"{source.parent.name}{source.suffix.lower()}"
+            if source.name.lower() in INDEX_NAMES and source.parent.name
+            else source.name
+        )
     link = folder / _clean_entry_name(name or default)
     if source.is_file() and link.suffix.lower() not in HTML_EXTENSIONS:
         link = link.with_name(link.name + source.suffix.lower())
@@ -1157,6 +1185,9 @@ class VaultCache:
         # a note in another notes vault, does not throw the other index away.
         self._indexes: dict[tuple[str, Path], VaultIndex] = {}
         self._generation = 0
+        # Run before each walk, with (root, kind): the app repairs Artifacts links whose pages moved (link_repair.py),
+        # so the listing that follows shows them working rather than missing.
+        self.prepare: Callable[[Path, str], None] | None = None
 
     def get(self, root: Path, kind: str = "notes") -> VaultIndex:
         root = normalize(root)
@@ -1169,6 +1200,8 @@ class VaultCache:
                 generation = self._generation
             if cached is not None and time.time() - cached.built_at < self.ttl:
                 return cached
+            if self.prepare is not None:
+                self.prepare(root, kind)
             index = VaultIndex.build(root, kind=kind)
             with self._state:
                 # A walk that began before an invalidate() may predate the change; its caller gets it, the cache doesn't.

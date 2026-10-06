@@ -738,10 +738,13 @@ e.preventDefault();
 // WebKit on macOS selects the word under a right-click before this event fires (for Look Up); a row isn't text to select.
 const sel=getSelection();if(sel&&sel.anchorNode&&row.contains(sel.anchorNode))sel.removeAllRanges();const holder=row.closest('[data-vault]'),vk=holder&&holder.dataset.vault,path=row.dataset.path||row.parentElement.dataset.path;if(!path||!vk)return;
 let x=e.clientX,y=e.clientY;if(!x&&!y){{const r=row.getBoundingClientRect();x=r.left+16;y=r.bottom}}
-const seq=++menuSeq;let d;try{{d=await api('/api/vault/entry?vault='+vk+'&path='+encodeURIComponent(path))}}catch(err){{OnyxMenu.toast(err.message,'bad');return}}if(seq!==menuSeq)return;
+// A missing Artifacts page also asks where its file might have gone, so the menu can offer to relink it (link_repair).
+const lost=vk==='html'&&row.classList.contains('missing')&&row.dataset.entry;
+const seq=++menuSeq;let d;try{{const q='?vault='+vk+'&path='+encodeURIComponent(path);d=await api('/api/vault/entry'+q);d.relink=null;if(lost)d.relink=await api('/api/vault/'+vk+'/relink?path='+encodeURIComponent(row.dataset.entry)).catch(()=>null)}}catch(err){{OnyxMenu.toast(err.message,'bad');return}}if(seq!==menuSeq)return;
 const items=[];if(!d.is_dir)items.push({{id:'open',label:'Open',enabled:d.exists}},{{id:'open-tab',label:'Open in New Tab',enabled:d.exists}});
 items.push({{id:'reveal',label:'Reveal in Finder',enabled:!!d.real,alt:{{id:'copy',label:'Copy Path'}}}});
 if(d.link)items.push({{id:'reveal-link',label:'Reveal Link in Finder',alt:{{id:'copy-link',label:'Copy Link Path'}}}});
+if(lost){{const r=d.relink,one=r&&r.candidates.length===1?r.candidates[0]:'';const fix=[];if(one)fix.push({{id:'relink-found',label:'Relink to '+shortPath(one)}});if(native)fix.push({{id:'relink-choose',label:'Choose New Location…'}});if(fix.length)items.push({{separator:true}},...fix)}}
 // The vault's own rows (see grip): a folder of its own takes a new one, and what the vault owns renames and moves; in
 // Artifacts it also pins and comes out, and a page given a name of its own can go back to its title.
 {{const own=row.tagName==='SUMMARY'&&row.parentElement.dataset.rel!==undefined,entry=row.dataset.entry,pinned=row.dataset.pinned!==undefined,more=[],node=NODES.get(path);
@@ -749,9 +752,13 @@ if(own)more.push({{id:'new-folder',label:'New Folder'}});if(entry)more.push({{id
 if(entry&&vk==='html'&&node&&node.n.named)more.push({{id:'use-title',label:'Use Page Title'}});
 if(entry&&vk==='html')more.push({{id:pinned?'unpin':'pin',label:pinned?'Unpin':'Pin to Top'}},{{id:'remove',label:'Remove from Artifacts'}});if(more.length)items.push({{separator:true}},...more)}}
 OnyxMenu.open({{items,x,y,label:(d.is_dir?'Folder':vk==='html'?'Page':'Note')+' actions',returnFocus:row,onClose:()=>row.classList.remove('menu-for'),onSelect:id=>rowAction(id,d,row,vk,x,y)}});row.classList.add('menu-for')}});
+// A missing page pointed at where its file is now: the one place Onyx found, or wherever the picker says.
+async function relinkRow(row,vk,r,found){{let target=found&&r?r.candidates[0]:'';if(!found){{target=await window.webkit.messageHandlers.askwPick.postMessage({{kind:r&&r.is_dir?'folder':'html',initial:r&&r.near||'',prompt:'Relink',message:'Where is “'+row.querySelector('.lbl').textContent+'” now?'}});if(Array.isArray(target))target=target[0]}}if(!target)return;
+const res=await postJSON('/api/vault/'+vk+'/relink',{{path:row.dataset.entry,target}});await loadTree();OnyxMenu.toast('Relinked to '+shortPath(res.target))}}
 function copyPath(p){{if(!navigator.clipboard)throw new Error('The clipboard is not available here.');return navigator.clipboard.writeText(p).then(()=>OnyxMenu.toast('Copied '+shortPath(p)))}}
 async function rowAction(id,d,row,vk,x,y){{try{{if(id==='open'){{if(row.tagName==='A')row.click();else navigate(viewHref(d.path,vk))}}else if(id==='open-tab')openTab(viewHref(d.path,vk));else if(id==='copy')await copyPath(d.real);else if(id==='copy-link')await copyPath(d.path);else if(id==='reveal'||id==='reveal-link')await postJSON('/api/vault/reveal',{{vault:vk,path:d.path,which:id==='reveal'?'real':'link'}})
 else if(id==='new-folder')newFolder(row.parentElement.dataset.rel,vk);else if(id==='rename')renameRow(row,vk);else if(id==='move-to')moveTo(row,vk,x,y);
+else if(id==='relink-found'||id==='relink-choose')await relinkRow(row,vk,d.relink,id==='relink-found');
 else if(id==='use-title'){{await postJSON('/api/vault/html/name',{{path:row.dataset.entry,name:''}});await loadTree()}}
 else if(id==='pin'||id==='unpin'){{await postJSON('/api/vault/html/pin',{{path:row.dataset.entry,pinned:id==='pin'}});await loadTree()}}
 else if(id==='remove'){{const r=await postJSON('/api/vault/html/remove',{{path:row.dataset.entry}});await loadTree();OnyxMenu.toast(r.removed==='link'?'Removed the link · the original is untouched':'Removed the folder')}}}}catch(err){{OnyxMenu.toast(err.message||String(err),'bad')}}}}

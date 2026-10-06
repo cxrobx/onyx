@@ -213,6 +213,15 @@ class Storage:
             );
             CREATE INDEX IF NOT EXISTS idx_highlights_document
                 ON highlights(document_source, created_at DESC);
+            -- Where each Artifacts link pointed, by the file's identity on this Mac (link_repair.py). Kept here, not
+            -- beside the links, because a file number means nothing on another Mac the folder is copied or synced to.
+            CREATE TABLE IF NOT EXISTS link_targets (
+                link TEXT PRIMARY KEY,
+                target TEXT NOT NULL,
+                dev INTEGER NOT NULL,
+                ino INTEGER NOT NULL,
+                is_dir INTEGER NOT NULL
+            );
             """
         )
         columns = {
@@ -541,6 +550,30 @@ class Storage:
             self._db.execute(f"DELETE FROM documents WHERE {match.replace('col', 'source')}", (old, n + 1, old + "/"))
             self._db.commit()
         return moved
+
+    def link_targets(self, root: str) -> dict[str, tuple[str, int, int, bool]]:
+        """The recorded target of every link under ``root``: link path -> (target, dev, ino, is_dir)."""
+        root = str(root).rstrip("/")
+        with self._lock:
+            rows = self._db.execute(
+                "SELECT link, target, dev, ino, is_dir FROM link_targets WHERE substr(link, 1, ?) = ?",
+                (len(root) + 1, root + "/"),
+            ).fetchall()
+        return {str(r["link"]): (str(r["target"]), int(r["dev"]), int(r["ino"]), bool(r["is_dir"])) for r in rows}
+
+    def remember_link_targets(self, rows: dict[str, tuple[str, int, int, bool]], forget: list[str] = ()) -> None:
+        """Record links' targets (as ``link_targets`` returns them) and drop the links in ``forget``."""
+        if not rows and not forget:
+            return
+        with self._lock:
+            self._db.executemany(
+                "INSERT INTO link_targets(link, target, dev, ino, is_dir) VALUES(?, ?, ?, ?, ?) "
+                "ON CONFLICT(link) DO UPDATE SET target=excluded.target, dev=excluded.dev, ino=excluded.ino, "
+                "is_dir=excluded.is_dir",
+                [(link, t, dev, ino, int(is_dir)) for link, (t, dev, ino, is_dir) in rows.items()],
+            )
+            self._db.executemany("DELETE FROM link_targets WHERE link = ?", [(link,) for link in forget])
+            self._db.commit()
 
     def upsert_document(
         self,

@@ -48,7 +48,7 @@ from .prompts import append_system_for, build_handoff_prompt, build_user_prompt
 from .providers import find_claude, find_codex, provider_catalogs, provider_status
 from .storage import Storage
 from .vault_ui import vault_page
-from . import first_run, handoff, markdown_theme, relink, search, sidebar_theme, vault, vault_look, vault_mode, viewer
+from . import first_run, handoff, link_repair, markdown_theme, relink, search, sidebar_theme, vault, vault_look, vault_mode, viewer
 from . import __version__
 
 logger = logging.getLogger("onyx.app")
@@ -1651,6 +1651,47 @@ def create_app(config: AppConfig) -> FastAPI:
             return {"path": str(path), "removed": vault.remove_entry(one.root, path)}
 
         return await _vault_edit(request, key, remove, html_only=True)
+
+    # A link whose page moved outside Onyx. Each listing repairs the ones it can be certain of (link_repair.sweep, run
+    # before every Artifacts walk); the rest show as missing, and the row menu asks here where the page might be now
+    # and, once one is chosen, re-aims the link at it.
+    @app.get("/api/vault/{key}/relink")
+    async def vault_relink_candidates_api(key: str, request: Request, path: str = ""):
+        if denied := api_forbidden(request):
+            return denied
+        headers = cors(request.headers.get("origin"))
+        one = _vault_named(app, key)
+        if one is None or one.kind != "html":
+            return JSONResponse({"ok": False, "error": "Only Artifacts has that."}, status_code=400, headers=headers)
+        try:
+            found = await asyncio.to_thread(link_repair.candidates, one.root, vault.normalize(path))
+        except (OSError, ValueError) as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400, headers=headers)
+        return JSONResponse({"ok": True, **found}, headers=headers)
+
+    @app.post("/api/vault/{key}/relink")
+    async def vault_relink_api(key: str, request: Request):
+        def relink_to(body: dict, one: _Vault, path: Path) -> dict:
+            with reorganising:
+                target = vault.retarget_link(one.root, path, str(body.get("target") or ""))
+                link_repair.sweep(one.root, app.state.storage)  # records where it points now
+            context = vault.html_context_folder(path, one.root)
+            if context:
+                _register_context_root(app, context)
+            return {"path": str(path), "target": str(target)}
+
+        return await _vault_edit(request, key, relink_to, html_only=True)
+
+    def _sweep_links(root: Path, kind: str) -> None:
+        if kind != "html":
+            return
+        try:
+            with reorganising:
+                link_repair.sweep(root, app.state.storage)
+        except Exception:  # a repair is a convenience; the listing must never fail for it
+            logger.exception("link repair failed in %s", root)
+
+    app.state.vault.prepare = _sweep_links
 
     @app.get("/api/settings")
     async def settings_api(request: Request):
