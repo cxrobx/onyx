@@ -21,10 +21,13 @@ The title band of the app's window passes clicks to the page everywhere but the 
 so a pill there takes its click, and the band's empty space drags the window. A pill whose title is cut widens under the
 pointer, pushing the others aside, and rolls a title still cut; the script's ``tab hover`` mark says why it is built so.
 
+Where a link opens lives here too, since the tabs are most of the answer: a plain ``target=reader`` link in the tab
+showing, a modified click in a tab of its own, and a link that leaves Onyx in the user's browser, never in the app.
+
 The script runs inside the shell's ``<script>`` and leans on it: ``$``, ``esc``, ``store``, ``recall``, ``reader``
 (reassigned here), ``stage``, ``KIND``, ``VAULTS``, ``switchVault``, ``showHome``, ``empty``, ``home``, ``goHome``,
 ``highlight``, ``traversed``, ``readerLoaded``, ``onReaderLoad``, ``api``, ``viewHref``, ``movedHref``, ``leftBehind``,
-``navigate``, ``readerPage`` and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs
+``navigate``, ``readerPage``, ``native`` and ``pageOnly`` (⌘B: no bar comes out); the shell adds ``TAB_SHELL`` to ``window.onyxShell``, runs
 ``restoreTabs`` as it starts, and ``remapTabs`` when the sidebar moves or renames a page.
 """
 
@@ -243,13 +246,30 @@ function modClick(e){const mid=e.type==='auxclick'&&e.button===1,mod=e.type==='c
 const el=e.target,a=el&&el.closest?el.closest('a[href]'):null;if(!a)return;let u;try{u=new URL(a.href)}catch(err){return}
 if(u.origin!==location.origin||!/^\/(view|quick)$/.test(u.pathname))return;e.preventDefault();e.stopPropagation();openTab(u.pathname+u.search+u.hash)}
 document.addEventListener('click',modClick,true);document.addEventListener('auxclick',modClick,true);
+// MARK: external links — a link to anywhere but Onyx opens outside it, and never in here. The reader is a reader: a web
+// page loaded into its frame arrives with no address bar and no tab of its own, and a note's link to a site, whose
+// target leaves the frame, used to take the whole window with it.
+// In the app the click is left alone: the app cancels the navigation itself and hands the URL to Launch Services
+// (`leavesOnyx`/`decidePolicyFor`, Onyx.swift), which takes every link activation there is and needs no window to be
+// allowed to open. Served to a browser there is no such layer, so the click is caught here and in the page, and asked
+// for in a window of its own — which that browser opens as a tab. Onyx's own pages are untouched, and so are a page's
+// own machinery (javascript:, about:, data:, blob:) and a link marked `download`.
+// It listens as the click bubbles, not on the way down: an artifact that handles its own link (a modal, a page of its
+// own drawn in place) has already said so by then, and is left alone.
+function leavesOnyx(u){if(['javascript:','about:','data:','blob:'].includes(u.protocol))return false;
+return /^https?:$/.test(u.protocol)?u.origin!==location.origin:true}
+function extClick(e){if(native||e.defaultPrevented||(e.type==='click'?e.button!==0:e.button!==1))return;
+const el=e.target,a=el&&el.closest?el.closest('a[href]'):null;if(!a||a.hasAttribute('download'))return;
+let u;try{u=new URL(a.href)}catch(err){return}if(!leavesOnyx(u))return;
+e.preventDefault();window.open(u.href,'_blank','noopener')}
+document.addEventListener('click',extClick);document.addEventListener('auxclick',extClick);
 // ⌘⇧] and ⌘⇧[ step through the tabs, ⌘1–8 go to that one, ⌘9 to the last, as in Safari; from the shell and the reader.
 function stepTab(d){const n=TABS.list.length;if(n>1)activateTab(TABS.list[(TABS.list.indexOf(TABS.active)+d+n)%n]);return true}
 function tabKey(e){if(!(e.metaKey||e.ctrlKey)||e.altKey)return;const n=TABS.list.length;let to=null;
 if(e.shiftKey&&(e.code==='BracketRight'||e.code==='BracketLeft')){e.preventDefault();stepTab(e.code==='BracketRight'?1:-1);return}
 if(!e.shiftKey&&/^Digit[1-9]$/.test(e.code)){const d=+e.code.slice(5);to=TABS.list[d===9?n-1:d-1]}if(!to)return;e.preventDefault();activateTab(to)}
 document.addEventListener('keydown',tabKey);
-onReaderLoad(()=>{try{const w=reader.contentWindow;w.addEventListener('click',modClick,true);w.addEventListener('auxclick',modClick,true);w.addEventListener('keydown',tabKey)}catch(e){}});
+onReaderLoad(()=>{try{const w=reader.contentWindow;w.addEventListener('click',modClick,true);w.addEventListener('auxclick',modClick,true);w.addEventListener('click',extClick);w.addEventListener('auxclick',extClick);w.addEventListener('keydown',tabKey)}catch(e){}});
 // A page from outside — Finder, File ▸ Open, Alfred — comes forward in the tab already reading it, or opens in a new
 // one; a tab resting on the home page takes it instead, as a browser's empty tab does. The service maps a real file to
 // the row a vault lists it as (the tree's nodes carry vault paths, not real ones), so the tree highlights it.

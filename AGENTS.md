@@ -221,6 +221,21 @@ so the shell asks the editor (`window.askwEditor`): headings with their places,
 and the note's text to search (source, markup included, as Obsidian's editor
 search does). `headingsOf` and `find_ui.collect` branch on `editorOf(doc)`.
 
+**A link that leaves Onyx opens outside it, and the app and the shell each take
+half of that.** Onyx is a reader: a page from another site loaded in here has no
+address bar and no tab of its own. In the app, `leavesOnyx` + `decidePolicyFor`
+(`launcher/Onyx.swift`) cancel the navigation and hand the URL to Launch
+Services — every link activation, whatever the page is, plus every window a page
+asks for (`createWebViewWith`). Served to a browser there is no such layer, so
+the shell catches the click instead (`extClick`, `tabs_ui.py`) and asks for a
+window of its own; it steps aside when `native`, so the two never both act on one
+click, and it listens as the click bubbles, so a page that handles its own link
+keeps it. The same rule is stated twice, in two languages, and the tests hold
+them together — including the launcher's, compiled out of the shipped source and
+run over a table.
+→ `tests/test_external_links.py`,
+`test_a_link_that_leaves_onyx_opens_outside_it` (browser suite)
+
 **A save writes the note in place, not to a temp file renamed over it.** A rename
 gives the file a new inode and creation date, and Obsidian shows and sorts notes by
 that date. `viewer.write_source` writes the new bytes over the old, then truncates.

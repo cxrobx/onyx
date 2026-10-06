@@ -4744,6 +4744,94 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_a_link_that_leaves_onyx_opens_outside_it(self) -> None:
+        # The failure class: Onyx is a reader, and a link to a site loaded the site inside it — into the reader frame,
+        # or, from a note (whose link leaves the frame), over the whole window, chrome and all, with no address bar and
+        # no way but Back. The click is caught in the shell and in the page and asked for in a window of its own; the
+        # app hands that to the browser (leavesOnyx/createWebViewWith, Onyx.swift, and tests/test_external_links.py).
+        artifacts = self._tab_pages()
+        one, two = artifacts / "Pages" / "one.html", artifacts / "Pages" / "two.html"
+        local = f"/view?src={urllib.parse.quote(str(two))}&vault=html"
+        one.write_text(
+            "<title>One</title><h1>One</h1>"
+            "<p><a id=out href='https://example.invalid/elsewhere'>A site</a>"
+            " <a id=mail href='mailto:someone@example.com'>Mail</a>"
+            f" <a id=local href='{local}'>Two</a>"
+            " <a id=hash href='#foot'>Down</a>"
+            " <a id=code href='javascript:void(0)'>Nothing</a>"
+            " <a id=own href='https://example.invalid/own'>Its own</a></p>"
+            "<p id=foot>Foot.</p>"
+            "<script>document.getElementById('own').addEventListener('click',e=>{"
+            "e.preventDefault();document.title='Handled'})</script>",
+            encoding="utf-8",
+        )
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    # The app's end of the handover is native (NSWorkspace), so what is checked here is the window the
+                    # shell asks for, in both engines, and that nothing in Onyx moved.
+                    page.add_init_script(
+                        "window.__opened = [];"
+                        "const was = window.open;"
+                        "window.open = (url, ...rest) => { window.__opened.push(String(url)); return null };"
+                    )
+                    popups: list = []
+                    page.on("popup", lambda popup: popups.append(popup))
+                    page.goto(f"{self.base_url}/vault?vault=html&src={urllib.parse.quote(str(one))}", wait_until="networkidle")
+                    reader = page.frame_locator("#reader")
+                    reader.locator("h1").wait_for()
+                    # The shell's listener goes onto the page at the frame's load event, after the heading shows: a
+                    # click before then is the browser's, and the site loads in the frame. Wait for the load to end.
+                    page.wait_for_function("() => document.querySelector('#reader').contentDocument.readyState === 'complete'")
+                    pills = page.locator("#tab-strip .tab")
+
+                    def showing() -> str:
+                        return page.evaluate("document.querySelector('#reader').contentDocument.title")
+
+                    def opened() -> list:
+                        return page.evaluate("window.__opened")
+
+                    # A link to a site: handed over, and the page it was clicked on is still the page showing.
+                    reader.locator("#out").click()
+                    self.assertEqual(opened(), ["https://example.invalid/elsewhere"])
+                    self.assertEqual(showing(), "One")
+                    # A ⌘-click on one goes the same way: there is no tab of Onyx's for a site.
+                    reader.locator("#out").click(modifiers=["Meta"])
+                    self.assertEqual(opened(), ["https://example.invalid/elsewhere"] * 2)
+                    expect(pills).to_have_count(1)
+                    # Not the web at all: the browser (in the app, Launch Services) knows what to do with it.
+                    reader.locator("#mail").click()
+                    self.assertEqual(opened()[-1], "mailto:someone@example.com")
+                    self.assertEqual(showing(), "One")
+                    # A page's own machinery is left alone, and so is a link within the page.
+                    reader.locator("#code").click()
+                    reader.locator("#hash").click()
+                    self.assertEqual(len(opened()), 3)
+                    page.wait_for_function(
+                        "() => document.querySelector('#reader').contentWindow.location.hash === '#foot'"
+                    )
+                    self.assertEqual(showing(), "One")
+                    # A page that handles its own link keeps it: the click is taken as it bubbles, so the page has
+                    # already had it. (In the app the navigation never happens either, so nothing leaks past.)
+                    reader.locator("#own").click()
+                    page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'Handled'")
+                    self.assertEqual(len(opened()), 3)
+                    # Onyx's own pages still navigate in the tab showing, which is the whole point of the origin test.
+                    reader.locator("#local").click()
+                    page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'Two'")
+                    self.assertEqual(len(opened()), 3)
+                    expect(pills).to_have_count(1)
+                    # The shell itself never went anywhere, and nothing asked the browser for a real window.
+                    self.assertEqual(urllib.parse.urlparse(page.url).path, "/vault")
+                    self.assertEqual(popups, [])
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_tabs_come_back_as_stubs_hold_six_frames_and_follow_a_rename(self) -> None:
         # The tabs outlive a reload and a relaunch. Only the tab showing gets a frame; the rest are stubs until shown,
         # when their page comes back where it was read. No more than six frames stay alive, never dropping one whose

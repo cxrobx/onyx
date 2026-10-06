@@ -297,6 +297,20 @@ private final class SwipeCover: NSView {
     override func hitTest(_ point: NSPoint) -> NSView? { nil }
 }
 
+/// Whether `url` is somewhere other than the local service — the test for "hand this to the browser".
+///
+/// Onyx is a reader, not a browser: a page from another site loaded in here arrives with no address bar, no tab of its
+/// own and the shell's chrome around it, and a Markdown page's link used to take the whole window with it. A page's own
+/// machinery (`javascript:`, `about:`, `data:`, `blob:`) never travels; everything that is not the service's own origin
+/// does, `mailto:`, `file:` and another app's scheme included — Launch Services knows what to do with each, and the
+/// reader does not.
+private func leavesOnyx(_ url: URL) -> Bool {
+    let scheme = (url.scheme ?? "").lowercased()
+    if ["javascript", "about", "data", "blob"].contains(scheme) { return false }
+    guard scheme == "http" || scheme == "https", let base = URL(string: baseURL) else { return true }
+    return !(scheme == base.scheme && url.host == base.host && url.port == base.port)
+}
+
 final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     WKUIDelegate, WKScriptMessageHandlerWithReply
 {
@@ -1283,6 +1297,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         }
     }
 
+    /// A link that leaves Onyx opens in the user's browser, and never in the app. This is the app's whole answer for
+    /// a click: the shell's own handler (`extClick`, tabs_ui.py) steps aside here, because a navigation is cancelled
+    /// whatever the page is — a note, a PDF, an artifact's frame, a page with no script of ours in it — while a window
+    /// has to be allowed to open first. Only a link the reader actually clicked is taken: an embedded frame (a video,
+    /// a map) navigates as `.other` and still loads in place, and a Back or Forward never re-opens the browser.
+    func webView(
+        _ webView: WKWebView,
+        decidePolicyFor navigationAction: WKNavigationAction,
+        decisionHandler: @escaping (WKNavigationActionPolicy) -> Void
+    ) {
+        guard navigationAction.navigationType == .linkActivated,
+              let url = navigationAction.request.url, leavesOnyx(url) else {
+            decisionHandler(.allow)
+            return
+        }
+        decisionHandler(.cancel)
+        NSWorkspace.shared.open(url)
+    }
+
     func webView(
         _ webView: WKWebView,
         createWebViewWith configuration: WKWebViewConfiguration,
@@ -1291,11 +1324,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     ) -> WKWebView? {
         guard let url = navigationAction.request.url else { return nil }
         // A page of Onyx's own asking for a window (a ⌘-click or middle click the shell didn't catch) opens as a tab,
-        // never over the shell. Anything else still loads here.
+        // never over the shell. A window asked for somewhere else is the shell handing over a link that leaves Onyx, or
+        // a page asking to: it goes to the browser. Anything else still loads here.
         if let base = URL(string: baseURL), url.host == base.host, url.port == base.port,
            ["/view", "/quick"].contains(url.path) {
             let href = url.path + (url.query.map { "?\($0)" } ?? "") + (url.fragment.map { "#\($0)" } ?? "")
             shellCall("onyxShell.openHref(\(jsString(href)))", fallback: href)
+        } else if leavesOnyx(url) {
+            NSWorkspace.shared.open(url)
         } else {
             webView.load(URLRequest(url: url))
         }

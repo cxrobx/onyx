@@ -127,7 +127,7 @@ class ViewerAndCitationTests(unittest.TestCase):
                 loaded.html,
             )
             self.assertIn(f'href="/view?src={quote(str(root / "B.md"))}&amp;folder={quote(str(root))}#sec"', loaded.html)
-            self.assertIn('href="https://example.com/a.md" rel="noreferrer noopener" target="_top"', loaded.html)
+            self.assertIn('href="https://example.com/a.md" rel="noreferrer noopener" target="_blank"', loaded.html)
             self.assertIn('href="notes.png"', loaded.html)
             self.assertIn('href="file:///tmp/nope.md"', loaded.html)  # absent file stays untouched
             self.assertIn('href="#local"', loaded.html)
@@ -221,7 +221,7 @@ class ViewerAndCitationTests(unittest.TestCase):
             self.assertNotIn("secret", html)
             self.assertIn("<code>%% code %%\n</code>", html)
             self.assertIn('<span class="askw-tag">#tag</span>, <span class="askw-tag">#nested/tag</span>, #1 and page#frag', html)
-            self.assertIn('<a href="https://obsidian.md/help" rel="noreferrer noopener" target="_top">https://obsidian.md/help</a>.', html)
+            self.assertIn('<a href="https://obsidian.md/help" rel="noreferrer noopener" target="_blank">https://obsidian.md/help</a>.', html)
             self.assertIn('href="https://en.wikipedia.org/wiki/A_(b)"', html)
             self.assertIn("<code>https://code</code>", html)
 

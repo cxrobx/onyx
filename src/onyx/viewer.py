@@ -645,7 +645,11 @@ def _render_link_open(self: Any, tokens: Any, idx: int, options: Any, env: Any) 
         token.attrSet("href", href)
     token.attrSet("rel", "noreferrer noopener")
     if isinstance(href, str) and href.lower().startswith(("http://", "https://")):
-        token.attrSet("target", "_top")  # leave the reader frame; a no-op at top level
+        # A link to a site leaves Onyx: the shell catches the click and hands it to the browser (extClick, tabs_ui.py),
+        # and the app does the same with a window asked for any other way (Onyx.swift). The target is what is left when
+        # neither is there — a note read straight from the service in a browser — and a window of its own is right there
+        # too. It was `_top` until 2026-10-06, which loaded the site over the whole of Onyx.
+        token.attrSet("target", "_blank")
     return self.renderToken(tokens, idx, options, env)
 
 
