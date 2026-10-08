@@ -116,8 +116,13 @@ reader=t.frame;TABS.active=t;t.used=Date.now();previewPageLook(t.href);
 if(t.kind&&t.kind!==KIND&&VAULTS[t.kind])switchVault(t.kind,true);
 if(t.loaded||!t.href)readerLoaded();else{showHome(false);empty.hidden=true;highlight(t.src)}
 evictTabs();tabsChanged()}
-// A new tab beside the one showing, reading `href` (a blank one is Library's home page), brought forward unless told not to.
-function openTab(href,o){o=o||{};const at=TABS.list.indexOf(TABS.active),t=makeTab({href:href||'',kind:o.kind||KIND});TABS.list.splice(at+1,0,t);
+// The tab already reading the page `href` names — by its file, or by its folder for a folder's page — if any. A page
+// is open once: asking for it again goes to that tab instead of opening a second.
+function tabReading(href){if(!href)return null;const q=new URLSearchParams((href.split('?')[1]||'').split('#')[0]),src=q.get('src')||'',folder=q.get('folder')||'';
+if(!src&&!folder)return null;return TABS.list.find(t=>src?t.src===src:!t.src&&t.folder===folder)||null}
+// A new tab beside the one showing, reading `href` (a blank one is Library's home page), brought forward unless told not
+// to — or, when a tab already reads that page, that tab, brought forward.
+function openTab(href,o){o=o||{};const have=tabReading(href);if(have){if(!o.background)activateTab(have);return have}const at=TABS.list.indexOf(TABS.active),t=makeTab({href:href||'',kind:o.kind||KIND});TABS.list.splice(at+1,0,t);
 tabFrame(t,href);if(o.background)tabsChanged();else activateTab(t);return t}
 // Closing the tab showing brings its right-hand neighbour forward, or its left. The last tab is never closed: it goes
 // home instead, and a lone home tab says no, so the window can close in its place.
@@ -276,7 +281,7 @@ onReaderLoad(()=>{try{const w=reader.contentWindow;w.addEventListener('click',mo
 async function openInTab(path){let loc=null;try{loc=await api('/api/vault/locate?src='+encodeURIComponent(path))}catch(e){}
 const k=loc&&loc.vault,src=loc&&loc.path||path,have=TABS.list.find(t=>t.src===src);if(have){activateTab(have);return}
 openHref(k?viewHref(src,k):'/view?src='+encodeURIComponent(src),k&&k===KIND?KIND:'library')}
-function openHref(href,k){k=k||KIND;const t=TABS.active;if(t&&!t.href&&!readerPage()){if(k!==KIND)switchVault(k,true);navigate(href);return}openTab(href,{kind:k})}
+function openHref(href,k){k=k||KIND;const have=tabReading(href);if(have){activateTab(have);return}const t=TABS.active;if(t&&!t.href&&!readerPage()){if(k!==KIND)switchVault(k,true);navigate(href);return}openTab(href,{kind:k})}
 // What the app's menu reaches (window.onyxShell): File ▸ New Tab and Close Tab, Window ▸ Show Next and Previous Tab, and
 // a new-window request the page made anyway (Onyx.swift, createWebViewWith). Close Tab answers false on a lone home tab.
 const TAB_SHELL={newTab:()=>{openTab('',{kind:'library'});return true},closeTab:()=>closeTab(),nextTab:()=>stepTab(1),prevTab:()=>stepTab(-1),

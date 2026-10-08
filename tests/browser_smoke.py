@@ -4691,29 +4691,33 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.keyboard.press("Meta+Shift+BracketRight")
                     self.assertEqual(showing(), "One")
 
-                    # ⌘-click on a link inside the page: a new tab, and this page stays where it is.
+                    # A page is open once. ⌘-click on a link inside the page to one a tab already reads goes to that
+                    # tab, and this page stays where it is.
                     page.frame_locator("#reader").locator("#next").click(modifiers=["Meta"])
-                    expect(pills).to_have_count(4)
                     page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'Two'")
+                    expect(pills).to_have_count(3)
+                    self.assertEqual(page.evaluate("TABS.list.indexOf(TABS.active)"), 2)
                     self.assertTrue(first_src().endswith("one.html"))
                     self.assertEqual(popups, [])
 
-                    # The row menu's Open in New Tab.
+                    # The row menu's Open in New Tab, on a page already open: that tab, not a second.
                     page.locator("#tree a.file", has_text="One").click(button="right")
                     page.get_by_role("menuitem", name="Open in New Tab").click()
-                    expect(pills).to_have_count(5)
                     self.assertEqual(showing(), "One")
+                    expect(pills).to_have_count(3)
+                    self.assertEqual(page.evaluate("TABS.list.indexOf(TABS.active)"), 0)
+                    # And the shell's openHref (a new-window request from the page) too.
+                    page.evaluate("h => onyxShell.openHref(h)", f"/view?src={urllib.parse.quote(str(two))}")
+                    self.assertEqual(showing(), "Two")
+                    expect(pills).to_have_count(3)
+                    page.keyboard.press("Meta+1")
 
                     # From outside (Finder, Alfred): the tab already on the page comes forward, else one opens.
-                    page.evaluate("onyxShell.closeTab()")
-                    page.keyboard.press("Meta+1")
-                    expect(pills).to_have_count(4)
                     page.evaluate("p => onyxShell.openInTab(p)", str(three))
                     page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'Three'")
-                    expect(pills).to_have_count(4)
-                    self.assertEqual(pills.evaluate_all("ps => ps.map(p => p.textContent)"), ["One", "Two", "Three", "Two"])
-                    self.assertEqual(page.evaluate("TABS.list.indexOf(TABS.active)"), 2)
-                    page.evaluate("onyxShell.closeTab()")
+                    expect(pills).to_have_count(3)
+                    self.assertEqual(pills.evaluate_all("ps => ps.map(p => p.textContent)"), ["One", "Three", "Two"])
+                    self.assertEqual(page.evaluate("TABS.list.indexOf(TABS.active)"), 1)
                     page.evaluate("onyxShell.closeTab()")
                     page.evaluate("onyxShell.closeTab()")
                     expect(pills).to_have_count(1)
@@ -4729,8 +4733,8 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(pills).to_have_count(3)
                     expect(page.locator("#home")).to_be_hidden()
 
-                    # ⌘↩ in the palette opens the pick in a new tab. (The pointer is parked clear of the list first: rows
-                    # drawn under it take the selection.)
+                    # ⌘↩ in the palette opens the pick in a new tab — here One, which a tab already reads, so that tab.
+                    # (The pointer is parked clear of the list first: rows drawn under it take the selection.)
                     page.mouse.move(10, 750)
                     page.keyboard.press("Meta+p")
                     page.locator("#search-input").fill("One")
@@ -4738,8 +4742,9 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(page.locator("#search-modal .sr-row[aria-selected=true]")).to_contain_text("One")
                     page.locator("#search-input").press("Meta+Enter")
                     expect(page.locator("#search-modal")).to_be_hidden()
-                    expect(pills).to_have_count(4)
                     page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'One'")
+                    expect(pills).to_have_count(3)
+                    self.assertEqual(page.evaluate("TABS.list.indexOf(TABS.active)"), 0)
                     browser.close()
 
         self.assertEqual(page_errors, [])
@@ -4931,9 +4936,11 @@ class BrowserSmokeTests(unittest.TestCase):
 
                     # Six frames at most: the ones shown longest ago go first, but an open answer panel keeps its own.
                     page.frame_locator("#reader").locator(".askw-panel").evaluate("p => p.classList.add('open')")
-                    for _ in range(6):
-                        page.evaluate("href => openTab(href)", f"/view?src={urllib.parse.quote(str(two))}")
-                        titled("Two")
+                    for i in range(6):  # six pages of their own: a page is open in one tab at most
+                        more = artifacts / "Pages" / f"more-{engine}-{i}.html"
+                        more.write_text(f"<title>More {i}</title><h1>More {i}</h1>", encoding="utf-8")
+                        page.evaluate("href => openTab(href)", f"/view?src={urllib.parse.quote(str(more))}")
+                        titled(f"More {i}")
                     expect(pills).to_have_count(9)
                     expect(frames).to_have_count(6)
                     self.assertTrue(page.evaluate("!!TABS.list[2].frame"))  # Three, the busy one
@@ -4946,7 +4953,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     try:
                         self.assertTrue((artifacts / "Docs" / "one.html").exists())
                         # The tab showing reloads from the new path (remap); the rest are pointed there at once.
-                        titled("Two")
+                        titled("More 5")
                         page.wait_for_function("() => TABS.list.every(t => decodeURIComponent(t.href).includes('/Docs/'))")
                         page.keyboard.press("Meta+1")
                         titled("One")
@@ -4976,8 +4983,10 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.goto(f"{self.base_url}/vault?vault=html&src={urllib.parse.quote(str(one))}", wait_until="networkidle")
                     # With room, a pill has its full width; it gives width up only as tabs crowd in.
                     self.assertEqual(page.locator("#tab-strip .tab").bounding_box()["width"], 180)
-                    for _ in range(11):
-                        page.evaluate("href => openTab(href, {background: true})", f"/view?src={urllib.parse.quote(str(two))}")
+                    for i in range(11):  # eleven pages of their own: a page is open in one tab at most
+                        more = artifacts / "Pages" / f"more-{engine}-{i}.html"
+                        more.write_text(f"<title>More {i}</title><h1>More {i}</h1>", encoding="utf-8")
+                        page.evaluate("href => openTab(href, {background: true})", f"/view?src={urllib.parse.quote(str(more))}")
                     pills, strip = page.locator("#tab-strip .tab"), page.locator("#tab-strip")
                     expect(pills).to_have_count(12)
                     shown = page.locator("#tab-strip .tab:not([hidden])")
