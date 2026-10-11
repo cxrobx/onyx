@@ -5163,6 +5163,63 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_a_tab_dragged_down_onto_the_page_splits_on_the_half_it_lands_on(self) -> None:
+        # A pill dragged down off the bar draws the half it would take over the page; let go there, its tab takes that
+        # half beside the page being read. A half dragged to the other side swaps them; Esc lets go without a split.
+        artifacts = self._tab_pages()
+        two, three = (artifacts / "Pages" / f"{n}.html" for n in ("two", "three"))
+        one = artifacts / "Pages" / "one.html"
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1400, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    pills, drop = page.locator("#tab-strip .tab"), page.locator("#split-drop")
+                    page.goto(f"{self.base_url}/vault?vault=html&src={urllib.parse.quote(str(one))}", wait_until="networkidle")
+                    for path in (two, three):
+                        page.evaluate("href => openTab(href)", f"/view?src={urllib.parse.quote(str(path))}")
+                    page.wait_for_function("() => document.querySelector('#reader').contentDocument?.title === 'Three'")
+                    page.evaluate("setTabsPinned(true)")
+                    stage = page.locator("#stage").bounding_box()
+
+                    def drag(title: str, x: float, *, cancel: bool = False) -> None:
+                        box = pills.filter(has_text=title).bounding_box()
+                        page.mouse.move(box["x"] + 40, box["y"] + box["height"] / 2)
+                        page.mouse.down()
+                        page.mouse.move(box["x"] + 40, box["y"] + 60, steps=3)
+                        page.mouse.move(x, stage["y"] + 300, steps=5)
+                        expect(drop).to_be_visible()
+                        expect(page.locator(".tab-ghost")).to_have_count(1)
+                        if cancel:
+                            page.keyboard.press("Escape")
+                        page.mouse.up()
+                        expect(drop).to_be_hidden()
+                        expect(page.locator(".tab-ghost")).to_have_count(0)
+
+                    left_x, right_x = stage["x"] + stage["width"] * 0.25, stage["x"] + stage["width"] * 0.75
+                    drag("One", left_x)
+                    page.wait_for_function("() => SPLIT && SPLIT.l.title === 'One' && SPLIT.r.title === 'Three'")
+                    self.assertEqual(page.evaluate("TABS.active.title"), "One")
+                    expect(page.locator("#split-bar")).to_be_visible()
+                    self.assertEqual(pills.evaluate_all("ps => ps.map(p => p.textContent)"), ["One", "Two", "Three"])
+
+                    drag("Three", left_x)
+                    page.wait_for_function("() => SPLIT.l.title === 'Three' && SPLIT.r.title === 'One'")
+
+                    drag("Two", right_x, cancel=True)
+                    self.assertEqual(page.evaluate("[SPLIT.l.title, SPLIT.r.title]"), ["Three", "One"])
+                    self.assertEqual(pills.evaluate_all("ps => ps.map(p => p.textContent)"), ["One", "Two", "Three"])
+
+                    # The page being read, dragged out of a single view, goes beside the tab read before it.
+                    page.evaluate("closeSplit(); activateTab(TABS.list.find(t => t.title === 'Two'))")
+                    drag("Two", right_x)
+                    page.wait_for_function("() => SPLIT && SPLIT.r.title === 'Two' && SPLIT.l.title === 'Three'")
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_a_cut_tab_widens_under_the_pointer_and_falls_back_smoothly(self) -> None:
         # A pill whose title is cut widens at once as the pointer lands on it (360 px at most) while the others give way,
         # and a title still cut rolls. The strip's width and place hold until the fall-back has finished, the widths

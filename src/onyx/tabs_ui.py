@@ -25,7 +25,8 @@ Split view puts two tabs side by side (the row menu's Open in Split View, or ⌥
 of tabs, not a new kind of frame: both frames are shown, in the stage's two columns either side of a divider that drags,
 and the one last clicked into is the reader, so the sidebar, ⌘F, the outline and Back all act on it. There is one split
 at a time; bringing forward a tab outside it shows that tab alone, and bringing forward either of its tabs shows the
-pair again. Closing either tab, or Close Split in the ⌄ list, ends it.
+pair again. Closing either tab, or Close Split in the ⌄ list, ends it. A pill dragged down off the bar onto the page
+splits too: the half it is dropped on is where it goes.
 
 Where a link opens lives here too, since the tabs are most of the answer: a plain ``target=reader`` link in the tab
 showing, a modified click in a tab of its own, and a link that leaves Onyx in the user's browser, never in the app.
@@ -97,6 +98,11 @@ body.tabs-pinned .tab-group,body.tabs-still .tab-group,body.tabs-still #reader-p
 #split-bar{grid-area:1/2;position:relative;z-index:2;background:var(--line);cursor:col-resize;touch-action:none} #split-bar[hidden]{display:none}
 #split-bar::before{content:'';position:absolute;inset:0 -4px} #split-bar:hover,#split-bar.split-drag,#split-bar:focus-visible{background:rgb(var(--accent)/.6);outline:none}
 #stage.split-dragging>iframe{pointer-events:none}
+/* A pill dragged down onto the page (tabSplitMode): a copy rides under the pointer, the pill it came from fades, and the
+   half it would take is drawn over the page. */
+.tab.tab-ghost{position:fixed;top:0;left:0;z-index:50;width:180px;pointer-events:none;background:rgb(var(--bg-elevated));color:rgb(var(--ink));font-weight:600;box-shadow:0 8px 24px rgb(0 0 0/.22)} .tab.tab-lifted{opacity:.4}
+#split-drop{position:absolute;top:6px;bottom:6px;left:6px;z-index:4;width:calc(50% - 9px);border:2px solid rgb(var(--accent)/.55);border-radius:10px;background:rgb(var(--accent)/.1);pointer-events:none;transition:left .12s cubic-bezier(.2,.8,.2,1)}
+#split-drop[data-side=r]{left:calc(50% + 3px)} #split-drop[hidden]{display:none} @media(prefers-reduced-motion:reduce){#split-drop{transition:none}}
 /* A pill dragged to a new place (tabDrag in the script) rides above the others, which slide aside as it passes them. */
 #tab-strip.tabs-dragging .tab{transition:transform .15s cubic-bezier(.2,.8,.2,1),background-color .12s,color .12s} #tab-strip.tabs-dragging .tab.tab-drag{position:relative;z-index:1;transition:none;background:rgb(var(--bg-elevated));color:rgb(var(--ink));box-shadow:0 2px 8px rgb(0 0 0/.18)}
 @media(prefers-reduced-motion:reduce){#tab-strip.tabs-dragging .tab{transition:none}}"""
@@ -236,20 +242,27 @@ tabStrip.addEventListener('click',e=>{if(tabDropped){e.stopPropagation();return}
 // The pills keep the widths they had (a widened one stays wide), measured as the drag starts, so none jumps under it.
 let tabDropped=false;
 tabStrip.addEventListener('pointerdown',e=>{if(e.button!==0||(tabDrag&&tabDrag.on)||e.target.closest('.tab-x'))return;const p=e.target.closest('.tab');
-if(p&&!p.hidden)tabDrag={p,id:+p.dataset.id,pointer:e.pointerId,x0:e.clientX,on:false}});
+if(p&&!p.hidden)tabDrag={p,id:+p.dataset.id,pointer:e.pointerId,x0:e.clientX,y0:e.clientY,on:false}});
 function tabDragStart(){const d=tabDrag,vis=[...tabStrip.querySelectorAll('.tab:not([hidden])')];d.vis=vis;d.at=vis.indexOf(d.p);d.to=d.at;
 d.rects=vis.map(q=>q.getBoundingClientRect());d.step=d.rects[d.at].width+parseFloat(getComputedStyle(tabStrip).columnGap||'0');
 for(const q of tabRest?tabRest.keys():[])tabUnwide(q,true);d.on=true;tabStrip.classList.add('tabs-dragging');d.p.classList.add('tab-drag');
 try{tabStrip.setPointerCapture(d.pointer)}catch(err){}}
-tabStrip.addEventListener('pointermove',e=>{const d=tabDrag;if(!d||e.pointerId!==d.pointer)return;
-if(!d.on){if(Math.abs(e.clientX-d.x0)<4)return;tabDragStart()}
+function tabDragMove(e){const d=tabDrag;if(!d||e.pointerId!==d.pointer)return;
+if(!d.on){if(Math.abs(e.clientX-d.x0)<4&&Math.abs(e.clientY-d.y0)<4)return;tabDragStart()}
+// Down off the bar (24 px below it), the drag is for split view, not the order; back up, it is for the order again.
+const down=TABS.list.length>1&&e.clientY>tabGroup.getBoundingClientRect().bottom+24;if(down!==!!d.split)tabSplitMode(d,down);if(d.split){tabSplitMove(d,e);return}
 const r=d.rects,me=r[d.at],dx=Math.min(Math.max(e.clientX-d.x0,r[0].left-me.left),r[r.length-1].right-me.right),mid=me.left+me.width/2+dx;
 d.p.style.transform=`translateX(${dx}px)`;let to=d.at;r.forEach((q,i)=>{const c=q.left+q.width/2;if(i>d.at&&mid>=c)to=i;if(i<d.at&&mid<=c&&to>=d.at)to=i});
-d.to=to;d.vis.forEach((q,i)=>{if(q===d.p)return;const s=i>d.at&&i<=to?-d.step:i<d.at&&i>=to?d.step:0;q.style.transform=s?`translateX(${s}px)`:''})});
+d.to=to;d.vis.forEach((q,i)=>{if(q===d.p)return;const s=i>d.at&&i<=to?-d.step:i<d.at&&i>=to?d.step:0;q.style.transform=s?`translateX(${s}px)`:''})}
+tabStrip.addEventListener('pointermove',tabDragMove);
+// A press dragged straight down leaves the strip (26 px tall) before it has moved 4 px along it, and over the page the
+// strip hears nothing more: leaving with the button still down starts the drag, and with it the capture.
+tabStrip.addEventListener('pointerleave',e=>{const d=tabDrag;if(d&&!d.on&&e.pointerId===d.pointer&&e.buttons&1){tabDragStart();tabDragMove(e)}});
 function tabDragEnd(e){const d=tabDrag;if(!d||(e&&e.pointerId!==d.pointer))return;tabDrag=null;if(!d.on)return;
 const drop=e&&e.type==='pointerup',from=d.p.getBoundingClientRect().left;try{tabStrip.releasePointerCapture(d.pointer)}catch(err){}
+const side=d.split&&d.side;if(d.split)tabSplitMode(d,false);
 tabStrip.classList.remove('tabs-dragging');for(const q of d.vis)q.style.transform='';d.p.classList.remove('tab-drag');
-const t=tabById(d.id),by=d.to!==d.at&&tabById(+d.vis[d.to].dataset.id);
+const t=tabById(d.id),by=d.to!==d.at&&tabById(+d.vis[d.to].dataset.id);if(drop&&t&&side)splitWith(t,side);
 if(drop&&t&&by&&by!==t){TABS.list.splice(TABS.list.indexOf(t),1);TABS.list.splice(TABS.list.indexOf(by)+(d.to>d.at?1:0),0,t)}
 if(drop){tabDropped=true;setTimeout(()=>{tabDropped=false})}drawTabs();saveTabs();
 // The pill glides the last of the way from where it was let go into its place.
@@ -257,6 +270,12 @@ const p=t&&document.getElementById('tab-'+t.id),gap=p?from-p.getBoundingClientRe
 if(p&&Math.abs(gap)>.5&&!stillMotion.matches)p.animate([{transform:`translateX(${gap}px)`},{transform:'none'}],{duration:150,easing:'cubic-bezier(.2,.8,.2,1)'});
 if(!tabsOver)tabsLater()}
 tabStrip.addEventListener('pointerup',tabDragEnd);tabStrip.addEventListener('pointercancel',tabDragEnd);tabStrip.addEventListener('lostpointercapture',tabDragEnd);
+function tabSplitMode(d,on){d.split=on;d.p.classList.toggle('tab-lifted',on);stage.classList.toggle('split-dragging',on);splitDrop.hidden=!on;
+if(on){d.to=d.at;for(const q of d.vis)q.style.transform='';d.ghost=d.p.cloneNode(true);d.ghost.removeAttribute('id');d.ghost.classList.remove('tab-drag','tab-lifted');d.ghost.classList.add('tab-ghost');document.body.append(d.ghost)}
+else if(d.ghost){d.ghost.remove();d.ghost=null}}
+function tabSplitMove(d,e){d.ghost.style.transform=`translate(${e.clientX+10}px,${e.clientY+10}px)`;const r=stage.getBoundingClientRect();d.side=e.clientX<r.left+r.width/2?'l':'r';splitDrop.dataset.side=d.side}
+// Esc lets go of a drag without dropping it: the capture is released, which ends the drag where it started.
+function tabDragCancel(e){if(e.key!=='Escape'||!tabDrag||!tabDrag.on)return false;e.preventDefault();try{tabStrip.releasePointerCapture(tabDrag.pointer)}catch(err){}tabDragEnd(null);return true}
 // The middle button closes a pill, as in every browser; its mousedown is kept from starting the page's autoscroll.
 tabStrip.addEventListener('mousedown',e=>{if(e.button===1)e.preventDefault()});
 tabStrip.addEventListener('auxclick',e=>{const p=e.button===1&&e.target.closest('.tab');if(p){e.preventDefault();closeTab(tabById(+p.dataset.id))}});
@@ -320,7 +339,7 @@ e.preventDefault();window.open(u.href,'_blank','noopener')}
 document.addEventListener('click',extClick);document.addEventListener('auxclick',extClick);
 // ⌘⇧] and ⌘⇧[ step through the tabs, ⌘1–8 go to that one, ⌘9 to the last, as in Safari; from the shell and the reader.
 function stepTab(d){const n=TABS.list.length;if(n>1)activateTab(TABS.list[(TABS.list.indexOf(TABS.active)+d+n)%n]);return true}
-function tabKey(e){if(!(e.metaKey||e.ctrlKey)||e.altKey)return;const n=TABS.list.length;let to=null;
+function tabKey(e){if(tabDragCancel(e))return;if(!(e.metaKey||e.ctrlKey)||e.altKey)return;const n=TABS.list.length;let to=null;
 if(e.shiftKey&&(e.code==='BracketRight'||e.code==='BracketLeft')){e.preventDefault();stepTab(e.code==='BracketRight'?1:-1);return}
 if(!e.shiftKey&&/^Digit[1-9]$/.test(e.code)){const d=+e.code.slice(5);to=TABS.list[d===9?n-1:d-1]}if(!to)return;e.preventDefault();activateTab(to)}
 document.addEventListener('keydown',tabKey);
@@ -379,7 +398,8 @@ t.href=href;t.src=move(t.src)||t.src;t.folder=move(t.folder)||t.folder;if(!t.fra
 // MARK: split view — two tabs side by side (see the module's note). SPLIT is the pair, left and right, and the share of
 // the stage the left one takes.
 const splitBar=document.createElement('div');splitBar.id='split-bar';splitBar.hidden=true;splitBar.tabIndex=0;
-splitBar.setAttribute('role','separator');splitBar.setAttribute('aria-orientation','vertical');splitBar.setAttribute('aria-label','Resize split');splitBar.title='Drag to resize · double-click to even';stage.append(splitBar);
+splitBar.setAttribute('role','separator');splitBar.setAttribute('aria-orientation','vertical');splitBar.setAttribute('aria-label','Resize split');splitBar.title='Drag to resize · double-click to even';
+const splitDrop=document.createElement('div');splitDrop.id='split-drop';splitDrop.hidden=true;stage.append(splitBar,splitDrop);
 function splitPeer(t){return !SPLIT?null:t===SPLIT.l?SPLIT.r:t===SPLIT.r?SPLIT.l:null}
 function splitShowing(t){const a=TABS.active;return !!SPLIT&&(a===SPLIT.l||a===SPLIT.r)&&(t===SPLIT.l||t===SPLIT.r)}
 function splitRatio(r){return r>=.1&&r<=.9?r:.5}
@@ -400,6 +420,13 @@ function openSplit(href){const a=TABS.active;if(!href||!a)return null;if(!a.href
 let t=tabReading(href);if(t===a)return a;const ratio=SPLIT?SPLIT.ratio:.5,right=!SPLIT||SPLIT.r!==a;
 if(!t){t=makeTab({href,kind:KIND});TABS.list.splice(TABS.list.indexOf(a)+1,0,t);tabFrame(t,href)}
 SPLIT=right?{l:a,r:t,ratio}:{l:t,r:a,ratio};activateTab(t);layoutSplit();tabsChanged();return t}
+// A pill dropped on a half of the page: its tab takes that half. Beside the split showing, the other half keeps what it
+// reads (a half dropped on the other side swaps them); otherwise beside the page being read, or, for that page's own
+// pill, beside the tab read before it.
+function splitWith(t,side){const a=TABS.active,shown=!!a&&splitShowing(a);let other=null;
+if(shown){if(t===SPLIT.l||t===SPLIT.r){if((side==='l')===(t===SPLIT.l))return;other=splitPeer(t)}else other=side==='l'?SPLIT.r:SPLIT.l}
+else if(t!==a&&a&&(a.href||readerPage()))other=a;else other=TABS.list.filter(x=>x!==t&&x.href).sort((x,y)=>y.used-x.used)[0]||null;
+if(!other)return;const ratio=SPLIT?SPLIT.ratio:.5;SPLIT=side==='l'?{l:t,r:other,ratio}:{l:other,r:t,ratio};activateTab(t);layoutSplit();tabsChanged()}
 function closeSplit(){if(!SPLIT)return;SPLIT=null;layoutSplit();tabsChanged()}
 // The divider: dragged, each half keeps 320 px at least; double-clicked, they are even again; ←/→ move it by 5 %.
 function setSplitRatio(r){if(!SPLIT)return;const w=stage.getBoundingClientRect().width,min=w>640?320/w:.5;SPLIT.ratio=Math.min(Math.max(r,min),1-min);layoutSplit()}
