@@ -5017,6 +5017,62 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_a_tab_dragged_along_the_bar_takes_its_new_place(self) -> None:
+        # A pill pressed and dragged follows the pointer, the others slide aside, and let go it takes the place it is
+        # over: the bar, ⌘1 and the saved tabs all follow the new order. A drag is not a click, so the tab showing stays.
+        artifacts = self._tab_pages()
+        one, two, three = (artifacts / "Pages" / f"{n}.html" for n in ("one", "two", "three"))
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.add_init_script("localStorage.setItem('askw:vault:tabbar', 'pinned')")
+                    page.goto(f"{self.base_url}/vault?vault=html&src={urllib.parse.quote(str(one))}", wait_until="networkidle")
+                    for other in (two, three):
+                        page.evaluate("href => openTab(href, {background: true})", f"/view?src={urllib.parse.quote(str(other))}")
+                    pills = page.locator("#tab-strip .tab")
+                    page.wait_for_function("() => TABS.list.every(t => t.title)")
+                    titles = lambda: pills.evaluate_all("ps => ps.map(p => p.textContent)")  # noqa: E731
+                    self.assertEqual(titles(), ["One", "Three", "Two"])  # each opened beside the tab showing
+
+                    # Two, dragged from the end to the front, past both: midway, the others have slid aside.
+                    last, first = pills.nth(2).bounding_box(), pills.nth(0).bounding_box()
+                    y = last["y"] + last["height"] / 2
+                    page.mouse.move(last["x"] + 40, y)
+                    page.mouse.down()
+                    for x in range(int(last["x"] + 40), int(first["x"] + 10), -12):
+                        page.mouse.move(x, y)
+                    self.assertTrue(page.evaluate("document.querySelector('#tab-strip').classList.contains('tabs-dragging')"))
+                    self.assertNotEqual(pills.nth(0).evaluate("p => p.style.transform"), "")
+                    page.mouse.up()
+                    self.assertEqual(titles(), ["Two", "One", "Three"])
+                    self.assertEqual(page.evaluate("TABS.active.title"), "One")
+                    expect(page.locator(".tab[aria-selected=true]")).to_have_text("One")
+                    saved = json.loads(page.evaluate("localStorage.getItem('askw:vault:tabs')"))
+                    self.assertEqual([t["title"] for t in saved["tabs"]], ["Two", "One", "Three"])
+                    self.assertEqual(saved["active"], 1)
+                    self.assertEqual(pills.evaluate_all("ps => ps.filter(p => p.style.transform).length"), 0)
+
+                    # A short drag that never passes a neighbour's middle leaves the order alone, and a press that never
+                    # moves is still a click.
+                    box = pills.nth(2).bounding_box()
+                    page.mouse.move(box["x"] + 30, y)
+                    page.mouse.down()
+                    page.mouse.move(box["x"] + 50, y)
+                    page.mouse.up()
+                    self.assertEqual(titles(), ["Two", "One", "Three"])
+                    self.assertEqual(page.evaluate("TABS.active.title"), "One")
+                    pills.nth(0).click()
+                    self.assertEqual(page.evaluate("TABS.active.title"), "Two")
+                    page.keyboard.press("Meta+3")
+                    self.assertEqual(page.evaluate("TABS.active.title"), "Three")
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_a_cut_tab_widens_under_the_pointer_and_falls_back_smoothly(self) -> None:
         # A pill whose title is cut widens at once as the pointer lands on it (360 px at most) while the others give way,
         # and a title still cut rolls. The strip's width and place hold until the fall-back has finished, the widths
