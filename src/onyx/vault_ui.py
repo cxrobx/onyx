@@ -234,7 +234,7 @@ main,body.native main{{position:relative;display:grid;padding:0;overflow:hidden}
    to scroll, and the app's WebKit scrolled it to reveal whatever took focus in the page (the Ask menu), lifting the page
    with nothing to scroll it back (2026-09-30). A clip is never a scroller. */
 #stage{{position:relative;display:grid;grid-template:minmax(0,1fr)/minmax(0,1fr);min-width:0;min-height:0;overflow:clip}}
-#stage>iframe{{grid-area:1/1;display:block;width:100%;height:100%;border:0;background:transparent}} #stage>iframe:not(#reader){{visibility:hidden;opacity:0;transform:translateY(calc(100% + 40px))}}
+#stage>iframe{{grid-area:1/1;display:block;width:100%;height:100%;border:0;background:transparent}} #stage>iframe:not(#reader):not(.split-l):not(.split-r){{visibility:hidden;opacity:0;transform:translateY(calc(100% + 40px))}}
 #reader-empty{{position:absolute;inset:0;display:grid;place-items:center;padding:24px;color:rgb(var(--muted));font-size:14px;text-align:center;pointer-events:none}} #reader-empty[hidden]{{display:none}} #reader-empty a{{pointer-events:auto;color:rgb(var(--accent))}}
 /* Library's home, in the reader's place while no page is open: open something, what you had open, what you asked. */
 #home{{position:absolute;inset:0;z-index:1;overflow:auto;padding:40px 44px 56px}} body.native #home{{padding-top:52px}} #home[hidden]{{display:none}}
@@ -741,7 +741,7 @@ let x=e.clientX,y=e.clientY;if(!x&&!y){{const r=row.getBoundingClientRect();x=r.
 // A missing Artifacts page also asks where its file might have gone, so the menu can offer to relink it (link_repair).
 const lost=vk==='html'&&row.classList.contains('missing')&&row.dataset.entry;
 const seq=++menuSeq;let d;try{{const q='?vault='+vk+'&path='+encodeURIComponent(path);d=await api('/api/vault/entry'+q);d.relink=null;if(lost)d.relink=await api('/api/vault/'+vk+'/relink?path='+encodeURIComponent(row.dataset.entry)).catch(()=>null)}}catch(err){{OnyxMenu.toast(err.message,'bad');return}}if(seq!==menuSeq)return;
-const items=[];if(!d.is_dir)items.push({{id:'open',label:'Open',enabled:d.exists}},{{id:'open-tab',label:'Open in New Tab',enabled:d.exists}});
+const items=[];if(!d.is_dir)items.push({{id:'open',label:'Open',enabled:d.exists}},{{id:'open-tab',label:'Open in New Tab',enabled:d.exists}},{{id:'open-split',label:'Open in Split View',enabled:d.exists}});
 items.push({{id:'reveal',label:'Reveal in Finder',enabled:!!d.real,alt:{{id:'copy',label:'Copy Path'}}}});
 if(d.link)items.push({{id:'reveal-link',label:'Reveal Link in Finder',alt:{{id:'copy-link',label:'Copy Link Path'}}}});
 if(lost){{const r=d.relink,one=r&&r.candidates.length===1?r.candidates[0]:'';const fix=[];if(one)fix.push({{id:'relink-found',label:'Relink to '+shortPath(one)}});if(native)fix.push({{id:'relink-choose',label:'Choose New Location…'}});if(fix.length)items.push({{separator:true}},...fix)}}
@@ -756,7 +756,7 @@ OnyxMenu.open({{items,x,y,label:(d.is_dir?'Folder':vk==='html'?'Page':'Note')+' 
 async function relinkRow(row,vk,r,found){{let target=found&&r?r.candidates[0]:'';if(!found){{target=await window.webkit.messageHandlers.askwPick.postMessage({{kind:r&&r.is_dir?'folder':'html',initial:r&&r.near||'',prompt:'Relink',message:'Where is “'+row.querySelector('.lbl').textContent+'” now?'}});if(Array.isArray(target))target=target[0]}}if(!target)return;
 const res=await postJSON('/api/vault/'+vk+'/relink',{{path:row.dataset.entry,target}});await loadTree();OnyxMenu.toast('Relinked to '+shortPath(res.target))}}
 function copyPath(p){{if(!navigator.clipboard)throw new Error('The clipboard is not available here.');return navigator.clipboard.writeText(p).then(()=>OnyxMenu.toast('Copied '+shortPath(p)))}}
-async function rowAction(id,d,row,vk,x,y){{try{{if(id==='open'){{if(row.tagName==='A')row.click();else navigate(viewHref(d.path,vk))}}else if(id==='open-tab')openTab(viewHref(d.path,vk));else if(id==='copy')await copyPath(d.real);else if(id==='copy-link')await copyPath(d.path);else if(id==='reveal'||id==='reveal-link')await postJSON('/api/vault/reveal',{{vault:vk,path:d.path,which:id==='reveal'?'real':'link'}})
+async function rowAction(id,d,row,vk,x,y){{try{{if(id==='open'){{if(row.tagName==='A')row.click();else navigate(viewHref(d.path,vk))}}else if(id==='open-tab')openTab(viewHref(d.path,vk));else if(id==='open-split')openSplit(viewHref(d.path,vk));else if(id==='copy')await copyPath(d.real);else if(id==='copy-link')await copyPath(d.path);else if(id==='reveal'||id==='reveal-link')await postJSON('/api/vault/reveal',{{vault:vk,path:d.path,which:id==='reveal'?'real':'link'}})
 else if(id==='new-folder')newFolder(row.parentElement.dataset.rel,vk);else if(id==='rename')renameRow(row,vk);else if(id==='move-to')moveTo(row,vk,x,y);
 else if(id==='relink-found'||id==='relink-choose')await relinkRow(row,vk,d.relink,id==='relink-found');
 else if(id==='use-title'){{await postJSON('/api/vault/html/name',{{path:row.dataset.entry,name:''}});await loadTree()}}

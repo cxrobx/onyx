@@ -5073,6 +5073,96 @@ class BrowserSmokeTests(unittest.TestCase):
 
         self.assertEqual(page_errors, [])
 
+    def test_split_view_shows_two_tabs_side_by_side_and_reads_in_the_half_clicked(self) -> None:
+        # Open in Split View puts a page beside the one being read: both frames shown, either side of a divider, and the
+        # half last clicked into is the reader, so a plain row click lands there. Another tab shows alone; either half
+        # brings the pair back; it outlives a reload; closing a half ends it.
+        artifacts = self._tab_pages()
+        one, two, three = (artifacts / "Pages" / f"{n}.html" for n in ("one", "two", "three"))
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1400, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    frames, bar = page.locator("#stage > iframe"), page.locator("#split-bar")
+
+                    def titled(title: str) -> None:
+                        page.wait_for_function("t => document.querySelector('#reader').contentDocument?.title === t", arg=title)
+
+                    page.goto(f"{self.base_url}/vault?vault=html&src={urllib.parse.quote(str(one))}", wait_until="networkidle")
+                    titled("One")
+                    # The row menu's Open in Split View: Two opens on the right and is the reader.
+                    page.locator("#tree a.file", has_text="Two").click(button="right")
+                    page.get_by_role("menuitem", name="Open in Split View").click()
+                    titled("Two")
+                    expect(bar).to_be_visible()
+                    left, right = frames.nth(0), frames.nth(1)
+                    lb, rb = left.bounding_box(), right.bounding_box()
+                    self.assertLess(lb["x"] + lb["width"], rb["x"] + 2)
+                    self.assertAlmostEqual(lb["width"], rb["width"], delta=4)
+                    self.assertGreater(lb["width"], 300)
+                    self.assertEqual(right.get_attribute("id"), "reader")
+                    self.assertFalse(left.evaluate("f => f.inert"))
+                    self.assertEqual(left.evaluate("f => getComputedStyle(f).opacity"), "1")
+
+                    # A click into the left half makes it the reader; a plain row click then reads there.
+                    page.mouse.click(lb["x"] + lb["width"] / 2, lb["y"] + 300)
+                    titled("One")
+                    self.assertEqual(left.get_attribute("id"), "reader")
+                    page.locator("#tree a.file", has_text="Three").click()
+                    titled("Three")
+                    self.assertEqual(left.evaluate("f => f.contentDocument.title"), "Three")
+                    self.assertEqual(right.evaluate("f => f.contentDocument.title"), "Two")
+
+                    # The divider drags, each half keeping 320 px at least.
+                    bb = bar.bounding_box()
+                    page.mouse.move(bb["x"] + 1, bb["y"] + 200)
+                    page.mouse.down()
+                    page.mouse.move(bb["x"] - 200, bb["y"] + 200, steps=4)
+                    page.mouse.up()
+                    self.assertLess(left.bounding_box()["width"], lb["width"] - 150)
+                    page.mouse.move(bb["x"] - 199, bb["y"] + 200)
+                    page.mouse.down()
+                    page.mouse.move(10, bb["y"] + 200, steps=4)
+                    page.mouse.up()
+                    self.assertGreaterEqual(left.bounding_box()["width"], 318)
+
+                    # A tab outside the split shows alone; either half brings the pair back.
+                    page.evaluate("href => openTab(href)", f"/view?src={urllib.parse.quote(str(one))}")
+                    titled("One")
+                    expect(bar).to_be_hidden()
+                    self.assertTrue(left.evaluate("f => f.inert"))
+                    page.keyboard.press("Meta+1")
+                    expect(bar).to_be_visible()
+                    self.assertFalse(left.evaluate("f => f.inert"))
+                    expect(page.locator("#tab-strip .tab.tab-peer")).to_have_count(1)
+
+                    # A reload brings the split back with its tabs and its share.
+                    ratio = page.evaluate("SPLIT.ratio")
+                    page.reload(wait_until="networkidle")
+                    expect(bar).to_be_visible()
+                    self.assertAlmostEqual(page.evaluate("SPLIT.ratio"), ratio, places=3)
+                    self.assertEqual(
+                        sorted(page.evaluate("[SPLIT.l.title, SPLIT.r.title]")), ["Three", "Two"]
+                    )
+
+                    # Closing a half ends the split; the other half is left reading alone.
+                    page.evaluate("closeTab(SPLIT.r)")
+                    expect(bar).to_be_hidden()
+                    self.assertIsNone(page.evaluate("SPLIT"))
+                    self.assertEqual(page.evaluate("TABS.active.title"), "Three")
+
+                    # ⌥-click on a row opens its page in the split, and downloads nothing.
+                    page.locator("#tree a.file", has_text="Two").click(modifiers=["Alt"])
+                    titled("Two")
+                    expect(bar).to_be_visible()
+                    self.assertEqual(page.evaluate("[SPLIT.l.title, SPLIT.r.title]"), ["Three", "Two"])
+                    browser.close()
+
+        self.assertEqual(page_errors, [])
+
     def test_a_cut_tab_widens_under_the_pointer_and_falls_back_smoothly(self) -> None:
         # A pill whose title is cut widens at once as the pointer lands on it (360 px at most) while the others give way,
         # and a title still cut rolls. The strip's width and place hold until the fall-back has finished, the widths

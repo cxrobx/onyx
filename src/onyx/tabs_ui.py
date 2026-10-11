@@ -21,6 +21,12 @@ The title band of the app's window passes clicks to the page everywhere but the 
 so a pill there takes its click, and the band's empty space drags the window. A pill whose title is cut widens under the
 pointer, pushing the others aside, and rolls a title still cut; the script's ``tab hover`` mark says why it is built so.
 
+Split view puts two tabs side by side (the row menu's Open in Split View, or ⌥-click on a link to a page). It is a pair
+of tabs, not a new kind of frame: both frames are shown, in the stage's two columns either side of a divider that drags,
+and the one last clicked into is the reader, so the sidebar, ⌘F, the outline and Back all act on it. There is one split
+at a time; bringing forward a tab outside it shows that tab alone, and bringing forward either of its tabs shows the
+pair again. Closing either tab, or Close Split in the ⌄ list, ends it.
+
 Where a link opens lives here too, since the tabs are most of the answer: a plain ``target=reader`` link in the tab
 showing, a modified click in a tab of its own, and a link that leaves Onyx in the user's browser, never in the app.
 
@@ -80,6 +86,17 @@ body.tabs-pinned .tab-group,body.tabs-still .tab-group,body.tabs-still #reader-p
 .tab-btn{display:grid;flex:none;place-items:center;width:26px;height:26px;padding:0;border:0;border-radius:7px;background:transparent;color:rgb(var(--secondary))}
 .tab-btn:hover,.tab-btn[aria-expanded=true]{background:rgb(var(--ink)/.08);color:rgb(var(--ink))} .tab-btn svg{width:15px;height:15px} .tab-btn:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:-2px}
 #tab-pin[aria-pressed=true] .pin-head{fill:currentColor}
+/* The other half of a split (the half not being read): raised as the tab showing is, but in the secondary ink. */
+.tab.tab-peer{background:rgb(var(--bg-elevated)/.6);color:rgb(var(--ink))}
+/* Split view: the stage's one cell becomes two columns either side of a divider, and the pair's frames sit in them. The
+   frames behind keep the stage's full width, so their pages keep their place. The half being read wears an accent line
+   along its top; a border, not a shadow, because an iframe draws its page over its own inset shadow. */
+#stage.split{grid-template-columns:minmax(320px,var(--split,50%)) 1px minmax(320px,1fr)} #stage.split>iframe{grid-area:1/1/2/4}
+#stage.split>iframe.split-l{grid-area:1/1} #stage.split>iframe.split-r{grid-area:1/3}
+#stage.split>iframe.split-l,#stage.split>iframe.split-r{box-sizing:border-box;border-top:2px solid transparent} #stage.split>iframe#reader{border-top-color:rgb(var(--accent)/.7)}
+#split-bar{grid-area:1/2;position:relative;z-index:2;background:var(--line);cursor:col-resize;touch-action:none} #split-bar[hidden]{display:none}
+#split-bar::before{content:'';position:absolute;inset:0 -4px} #split-bar:hover,#split-bar.split-drag,#split-bar:focus-visible{background:rgb(var(--accent)/.6);outline:none}
+#stage.split-dragging>iframe{pointer-events:none}
 /* A pill dragged to a new place (tabDrag in the script) rides above the others, which slide aside as it passes them. */
 #tab-strip.tabs-dragging .tab{transition:transform .15s cubic-bezier(.2,.8,.2,1),background-color .12s,color .12s} #tab-strip.tabs-dragging .tab.tab-drag{position:relative;z-index:1;transition:none;background:rgb(var(--bg-elevated));color:rgb(var(--ink));box-shadow:0 2px 8px rgb(0 0 0/.18)}
 @media(prefers-reduced-motion:reduce){#tab-strip.tabs-dragging .tab{transition:none}}"""
@@ -88,11 +105,11 @@ TABS_HTML = """<div id=tab-bar data-drag><div class=tab-group data-nodrag><div i
 
 TABS_JS = r"""// MARK: tabs — a frame per tab in #stage (tabs_ui.py). The first adopts the frame the server drew, named `reader`;
 // the rest are named once, at birth, and never again (see the module's note on WebKit's history).
-const TABS={list:[],active:null},TAB_RUN=Date.now().toString(36),TAB_X=__X__;let tabSeq=0;
+const TABS={list:[],active:null},TAB_RUN=Date.now().toString(36),TAB_X=__X__;let tabSeq=0,SPLIT=null;
 function makeTab(o){const id=++tabSeq,t=Object.assign({id,name:'reader-'+TAB_RUN+'-'+id,frame:null,href:'',src:'',folder:'',kind:KIND,title:'',loaded:false,used:Date.now()},o);
 if(t.href&&!t.src){const q=new URLSearchParams((t.href.split('?')[1]||'').split('#')[0]);t.src=q.get('src')||'';t.folder=q.get('folder')||''}return t}
 function tabById(id){return TABS.list.find(t=>t.id===id)||null}
-function wireFrame(t,f){t.frame=f;f.addEventListener('load',()=>{tellPainted();try{f.contentWindow.addEventListener('popstate',tellPainted)}catch(e){}if(t.frame===f)frameLoaded(t)})}
+function wireFrame(t,f){t.frame=f;f.addEventListener('load',()=>{tellPainted();try{f.contentWindow.addEventListener('popstate',tellPainted)}catch(e){}splitFocus(t);if(t.frame===f)frameLoaded(t)})}
 // A frame after a page lands in a tab, the app hears it is on screen: a back/forward swipe holds a picture of it over
 // the window until then (SwipeCover in Onyx.swift), because WebKit lifts its own once the shell has painted, before the
 // frame has. A traversal inside one page loads nothing, so it says so on popstate.
@@ -114,8 +131,8 @@ if(f===reader)readerLoaded();else if(!blank&&traversed(f)){activateTab(t);return
 // that follows the reader follows it (readerLoaded), as a load would. A tab not shown since a restore gets its frame now.
 function activateTab(t){if(!t||t===TABS.active||!TABS.list.includes(t))return;const was=TABS.active;if(was){was.kind=KIND;was.used=Date.now()}
 if(t.moved&&t.frame&&!tabStreaming(t))dropFrame(t);if(!t.frame)tabFrame(t,t.href);
-if(reader&&reader!==t.frame)reader.removeAttribute('id');for(const x of TABS.list)if(x.frame)x.frame.inert=x!==t;t.frame.id='reader';
-reader=t.frame;TABS.active=t;t.used=Date.now();previewPageLook(t.href);
+if(reader&&reader!==t.frame)reader.removeAttribute('id');t.frame.id='reader';
+reader=t.frame;TABS.active=t;t.used=Date.now();layoutSplit();previewPageLook(t.href);
 if(t.kind&&t.kind!==KIND&&VAULTS[t.kind])switchVault(t.kind,true);
 if(t.loaded||!t.href)readerLoaded();else{showHome(false);empty.hidden=true;highlight(t.src)}
 evictTabs();tabsChanged()}
@@ -131,7 +148,7 @@ tabFrame(t,href);if(o.background)tabsChanged();else activateTab(t);return t}
 // home instead, and a lone home tab says no, so the window can close in its place.
 function closeTab(t){t=t||TABS.active;const i=TABS.list.indexOf(t);if(i<0)return false;
 if(TABS.list.length===1){if(KIND==='library'&&!home.hidden)return false;if(KIND==='library')goHome();else switchVault('library');return true}
-if(t===TABS.active)activateTab(TABS.list[i+1]||TABS.list[i-1]);TABS.list.splice(i,1);if(t.frame)t.frame.remove();t.frame=null;tabsChanged();return true}
+const peer=splitPeer(t);if(peer)SPLIT=null;if(t===TABS.active)activateTab(peer||TABS.list[i+1]||TABS.list[i-1]);else if(peer)layoutSplit();TABS.list.splice(i,1);if(t.frame)t.frame.remove();t.frame=null;tabsChanged();return true}
 function closeOtherTabs(){for(const t of TABS.list.slice())if(t!==TABS.active)closeTab(t)}
 // A plain `target=reader` link goes to the tab showing: pointed there as it is clicked (Return on a focused link clicks it too).
 document.addEventListener('click',e=>{const a=e.target instanceof Element?e.target.closest('a[target]'):null;if(a&&reader&&/^reader(-|$)/.test(a.target))a.target=reader.name},true);
@@ -142,10 +159,10 @@ function tabLabel(t){return t.title||(t.src?t.src.split('/').pop():t.href?'Loadi
 function drawTabs(){const had=tabStrip.contains(document.activeElement),ps=[...tabStrip.children],same=ps.length===TABS.list.length&&TABS.list.every((t,i)=>+ps[i].dataset.id===t.id),keep=same&&tabHover;tabsFree();
 // The same tabs (one brought forward, a title come in) are redrawn in place, never replaced: WebKit loses the hover of a
 // node replaced under the pointer and never tells the strip it left, so a pill clicked while wide stayed wide (2026-09-25).
-if(same)TABS.list.forEach((t,i)=>{const p=ps[i],on=t===TABS.active,l=tabLabel(t);p.setAttribute('aria-selected',on);p.tabIndex=on?0:-1;if(p.getAttribute('aria-label')===l)return;
+if(same)TABS.list.forEach((t,i)=>{const p=ps[i],on=t===TABS.active,l=tabLabel(t);p.setAttribute('aria-selected',on);p.classList.toggle('tab-peer',!on&&splitShowing(t));p.tabIndex=on?0:-1;if(p.getAttribute('aria-label')===l)return;
 p.setAttribute('aria-label',l);if(!p.classList.contains('tab-wide'))p.title=l;p.querySelector('.tab-text').textContent=l;p.querySelector('.tab-x').setAttribute('aria-label','Close '+l)});
 else{tabHover=null;tabStrip.innerHTML=TABS.list.map(t=>{const on=t===TABS.active,l=esc(tabLabel(t));
-return `<div class=tab role=tab id=tab-${t.id} data-id=${t.id} aria-selected=${on} tabindex=${on?0:-1} title="${l}" aria-label="${l}"><span class=tab-title><span class=tab-text>${l}</span></span><button class=tab-x type=button tabindex=-1 title="Close tab" aria-label="Close ${l}">${TAB_X}</button></div>`}).join('')}
+return `<div class="tab${!on&&splitShowing(t)?' tab-peer':''}" role=tab id=tab-${t.id} data-id=${t.id} aria-selected=${on} tabindex=${on?0:-1} title="${l}" aria-label="${l}"><span class=tab-title><span class=tab-text>${l}</span></span><button class=tab-x type=button tabindex=-1 title="Close tab" aria-label="Close ${l}">${TAB_X}</button></div>`}).join('')}
 fitTabs();if(had){const p=TABS.active&&document.getElementById('tab-'+TABS.active.id);if(p)p.focus()}
 // The pill under the pointer stays as it was, measured again: a title shown in bold is a little wider.
 if(keep){if(keep.hidden){tabUnwide(keep,true);tabHover=null}else tabPick(keep,true)}}
@@ -252,9 +269,9 @@ if(window.ResizeObserver)new ResizeObserver(()=>{tabsSettle();fitTabs()}).observ
 // ⌄: every tab, the one showing checked, and Close Other Tabs. The bar stays out while the list is open.
 let tabMenuOpen=false;
 tabList.onclick=()=>{if(!window.OnyxMenu)return;const r=tabList.getBoundingClientRect(),items=TABS.list.map(t=>({id:'tab:'+t.id,label:tabLabel(t),checked:t===TABS.active}));
-items.push({separator:true},{id:'close-others',label:'Close Other Tabs',enabled:TABS.list.length>1});tabMenuOpen=true;tabList.setAttribute('aria-expanded','true');
+items.push({separator:true});if(SPLIT)items.push({id:'close-split',label:'Close Split'});items.push({id:'close-others',label:'Close Other Tabs',enabled:TABS.list.length>1});tabMenuOpen=true;tabList.setAttribute('aria-expanded','true');
 OnyxMenu.open({items,x:r.left,y:r.bottom+4,label:'Tabs',returnFocus:tabList,onClose:()=>{tabMenuOpen=false;tabList.setAttribute('aria-expanded','false');if(!tabsOver)tabsLater()},
-onSelect:id=>{if(id==='close-others')closeOtherTabs();else activateTab(tabById(+id.slice(4)))}})};
+onSelect:id=>{if(id==='close-split')closeSplit();else if(id==='close-others')closeOtherTabs();else activateTab(tabById(+id.slice(4)))}})};
 // MARK: tab bar reveal and pin — as the sidebar's (a 40 ms beat to come out, 400 ms of grace to go, polled again while in
 // use), watched from the reader's own pointer moves as the outline's edge is; on the home page, from the stage's.
 const TABBAR_KEY='askw:vault:tabbar';let tabsOver=false,tabsTimer=0,tabsAtEdge=false;
@@ -276,13 +293,13 @@ tabGroup.addEventListener('focusout',()=>{if(!tabsOver)tabsLater()});
 tabGroup.addEventListener('keydown',e=>{if(e.key==='Escape'&&!tabsPinned()){document.activeElement.blur();tabsOut(false)}});
 tabPin.onclick=()=>setTabsPinned(!tabsPinned());document.addEventListener('keydown',tabsKey);
 onReaderLoad(()=>{tabsAtEdge=false;try{const w=reader.contentWindow;w.addEventListener('mousemove',tabsEdgeMove,{passive:true});w.addEventListener('keydown',tabsKey);w.document.documentElement.addEventListener('mouseleave',tabsEdgeLeave)}catch(e){}});
-// MARK: tab entry points — ⌘-click or a middle click on a link to a page opens it in a new tab, in the shell and inside
-// the page alike (the row menu's Open in New Tab, ⌘ on a Related row and ⌘↩ in the palette are their own). Left to the
+// MARK: tab entry points — ⌘-click or a middle click on a link to a page opens it in a new tab, and ⌥-click in split
+// view (which also keeps WebKit from downloading it), in the shell and inside the page alike (the row menu's Open in New Tab, ⌘ on a Related row and ⌘↩ in the palette are their own). Left to the
 // browser, either asks for a new window, and the app used to load the page over the whole shell. A plain click is
 // never touched: it is the browser's own navigation, in the tab showing.
-function modClick(e){const mid=e.type==='auxclick'&&e.button===1,mod=e.type==='click'&&e.button===0&&(e.metaKey||e.ctrlKey);if(!mid&&!mod)return;
+function modClick(e){const mid=e.type==='auxclick'&&e.button===1,mod=e.type==='click'&&e.button===0&&(e.metaKey||e.ctrlKey),alt=e.type==='click'&&e.button===0&&e.altKey&&!mod;if(!mid&&!mod&&!alt)return;
 const el=e.target,a=el&&el.closest?el.closest('a[href]'):null;if(!a)return;let u;try{u=new URL(a.href)}catch(err){return}
-if(u.origin!==location.origin||!/^\/(view|quick)$/.test(u.pathname))return;e.preventDefault();e.stopPropagation();openTab(u.pathname+u.search+u.hash)}
+if(u.origin!==location.origin||!/^\/(view|quick)$/.test(u.pathname))return;e.preventDefault();e.stopPropagation();const href=u.pathname+u.search+u.hash;if(alt)openSplit(href);else openTab(href)}
 document.addEventListener('click',modClick,true);document.addEventListener('auxclick',modClick,true);
 // MARK: external links — a link to anywhere but Onyx opens outside it, and never in here. The reader is a reader: a web
 // page loaded into its frame arrives with no address bar and no tab of its own, and a note's link to a site, whose
@@ -328,32 +345,70 @@ if(recall(TABBAR_KEY)==='pinned'){document.body.classList.add('tabs-still');setT
 // the one shown longest ago gives its frame up — never one whose answer panel is open or still streaming.
 const TABS_KEY='askw:vault:tabs',TAB_LIVE=6;
 function savedHref(h){if(!h||!/[?&]history(_action)?=/.test(h))return h;const u=new URL(h,location.origin);u.searchParams.delete('history');u.searchParams.delete('history_action');return u.pathname+u.search+u.hash}
-function saveTabs(){const tabs=[];let active=0;for(const t of TABS.list){const href=savedHref(t.href);if(href.startsWith('/quick')&&href.length>2048)continue;if(t===TABS.active)active=tabs.length;
-tabs.push({href,src:t.src,folder:t.folder,kind:t===TABS.active?KIND:t.kind,title:t.title})}store(TABS_KEY,JSON.stringify({v:1,active,tabs}))}
+function saveTabs(){const tabs=[];let active=0;for(const t of TABS.list){t.saved=-1;const href=savedHref(t.href);if(href.startsWith('/quick')&&href.length>2048)continue;if(t===TABS.active)active=tabs.length;
+tabs.push({href,src:t.src,folder:t.folder,kind:t===TABS.active?KIND:t.kind,title:t.title});t.saved=tabs.length-1}
+const split=SPLIT&&SPLIT.l.saved>=0&&SPLIT.r.saved>=0?{l:SPLIT.l.saved,r:SPLIT.r.saved,ratio:SPLIT.ratio}:null;for(const t of TABS.list)delete t.saved;
+store(TABS_KEY,JSON.stringify({v:1,active,tabs,split}))}
 addEventListener('pagehide',saveTabs);
 function tabBusy(t){try{return !!t.frame.contentDocument.querySelector('.askw-panel.open,.askw-panel[aria-busy=true]')}catch(e){return false}}
 function tabStreaming(t){try{return !!t.frame.contentDocument.querySelector('.askw-panel[aria-busy=true]')}catch(e){return false}}
 function dropFrame(t){t.frame.remove();t.frame=null;t.loaded=false;t.moved=false}
 function evictTabs(){const live=()=>TABS.list.filter(t=>t.frame).length;if(live()<=TAB_LIVE)return;
-for(const t of TABS.list.filter(t=>t.frame&&t!==TABS.active&&t.loaded&&!tabBusy(t)).sort((a,b)=>a.used-b.used)){if(live()<=TAB_LIVE)break;dropFrame(t)}}
+for(const t of TABS.list.filter(t=>t.frame&&t!==TABS.active&&!splitPeer(t)&&t.loaded&&!tabBusy(t)).sort((a,b)=>a.used-b.used)){if(live()<=TAB_LIVE)break;dropFrame(t)}}
 // Run by the shell as it starts (it needs the view switch, set up after this). The frame the server drew is the tab
 // showing: it takes the place of the saved tab on the same page, or, new, the place after the one that showed. A blank
 // one — the app opening on Library — reads the saved tab that showed instead, in its view.
 function restoreTabs(){let saved=null;try{saved=JSON.parse(recall(TABS_KEY)||'null')}catch(e){}
 if(!saved||saved.v!==1||!Array.isArray(saved.tabs))return false;const t0=TABS.list[0];
 const list=saved.tabs.filter(x=>x&&typeof x.href==='string').map(x=>makeTab({href:x.href,src:String(x.src||''),folder:String(x.folder||''),kind:VAULTS[x.kind]?x.kind:'library',title:String(x.title||'')}));if(!list.length)return false;
-let at=Math.min(Math.max(saved.active|0,0),list.length-1),restored=false;
+let at=Math.min(Math.max(saved.active|0,0),list.length-1),restored=false;const sp=saved.split,sl=sp&&list[sp.l],sr=sp&&list[sp.r];
 if(t0.src){const m=list[at].src===t0.src?at:list.findIndex(t=>t.src===t0.src);if(m>=0){list[m]=t0;at=m}else list.splice(++at,0,t0)}
 else if(KIND==='library'){const x=list[at];Object.assign(t0,{href:x.href,src:x.src,folder:x.folder,title:x.title});list[at]=t0;if(x.kind!==KIND)switchVault(x.kind,true);if(x.href){navigate(x.href);restored=true}}
 else list.splice(++at,0,t0);
-TABS.list=list;drawTabs();return restored}
+TABS.list=list;
+// The split comes back with its tabs: one that the frame the server drew took the place of is that frame's tab now.
+const kept=x=>x&&(list.includes(x)?x:t0.src&&x.src===t0.src?t0:null),l=kept(sl),r=kept(sr);
+if(l&&r&&l!==r)SPLIT={l,r,ratio:splitRatio(+sp.ratio)};layoutSplit();drawTabs();return restored}
 // A move or rename (vault_ui's remap): a tab behind on a page that moved keeps its place in the bar, the vault it reads
 // in and its heading (movedHref), and reads the page from its new path when next shown. Its frame goes, so no page lives
 // on at a path that is gone: one left there kept showing the old path to the service (live reload, ⌘E). An open answer
 // panel goes with it, its conversation kept in History and moved with the page; only one still being written keeps its
 // frame, and is re-pointed when shown once it is done (activateTab), unless it has gone to another page meanwhile.
 function remapTabs(move){for(const t of TABS.list){if(t===TABS.active)continue;const href=movedHref(t.href,move);if(!href)continue;
-t.href=href;t.src=move(t.src)||t.src;t.folder=move(t.folder)||t.folder;if(!t.frame)continue;if(tabStreaming(t))t.moved=true;else dropFrame(t)}saveTabs()}
+t.href=href;t.src=move(t.src)||t.src;t.folder=move(t.folder)||t.folder;if(!t.frame)continue;if(tabStreaming(t))t.moved=true;else dropFrame(t)}layoutSplit();saveTabs()}
+// MARK: split view — two tabs side by side (see the module's note). SPLIT is the pair, left and right, and the share of
+// the stage the left one takes.
+const splitBar=document.createElement('div');splitBar.id='split-bar';splitBar.hidden=true;splitBar.tabIndex=0;
+splitBar.setAttribute('role','separator');splitBar.setAttribute('aria-orientation','vertical');splitBar.setAttribute('aria-label','Resize split');splitBar.title='Drag to resize · double-click to even';stage.append(splitBar);
+function splitPeer(t){return !SPLIT?null:t===SPLIT.l?SPLIT.r:t===SPLIT.r?SPLIT.l:null}
+function splitShowing(t){const a=TABS.active;return !!SPLIT&&(a===SPLIT.l||a===SPLIT.r)&&(t===SPLIT.l||t===SPLIT.r)}
+function splitRatio(r){return r>=.1&&r<=.9?r:.5}
+// What the stage shows: the reader alone, or the pair when the reader is half of it. A frame not shown is inert; a half
+// that a restore left as a stub gets its frame now.
+function layoutSplit(){const s=SPLIT,a=TABS.active,on=!!s&&!!a&&(a===s.l||a===s.r);
+if(on)for(const x of [s.l,s.r])if(!x.frame||(x.moved&&!tabStreaming(x))){if(x.frame)dropFrame(x);tabFrame(x,x.href)}
+for(const x of TABS.list){if(!x.frame)continue;const l=on&&x===s.l,r=on&&x===s.r;x.frame.classList.toggle('split-l',l);x.frame.classList.toggle('split-r',r);x.frame.inert=x!==a&&!l&&!r;if(l||r)splitFocus(x)}
+stage.classList.toggle('split',on);splitBar.hidden=!on;if(on){stage.style.setProperty('--split',(s.ratio*100).toFixed(2)+'%');splitBar.setAttribute('aria-valuenow',Math.round(s.ratio*100))}}
+// A click anywhere in the half not being read makes it the reader — on the way down, so the click's own work (a link,
+// a selection to ask about) happens in the half that is now the reader. Bound once per page the frame loads.
+function splitFocus(t){const f=t.frame;let w;try{w=f&&f.contentWindow;if(!w||w.askwSplitFocus)return;
+w.askwSplitFocus=()=>{if(t.frame===f&&t!==TABS.active&&splitShowing(t))activateTab(t)};w.addEventListener('pointerdown',w.askwSplitFocus,true)}catch(e){}}
+// Open `href` beside the page being read. Already half of the split, the reader keeps its side and the page takes the
+// other half's place (that tab stays open, behind). A page open in a tab already is that tab, moved into the split. With
+// nothing being read there is nothing to sit beside, so the page opens in the tab showing.
+function openSplit(href){const a=TABS.active;if(!href||!a)return null;if(!a.href&&!readerPage()){openHref(href);return a}
+let t=tabReading(href);if(t===a)return a;const ratio=SPLIT?SPLIT.ratio:.5,right=!SPLIT||SPLIT.r!==a;
+if(!t){t=makeTab({href,kind:KIND});TABS.list.splice(TABS.list.indexOf(a)+1,0,t);tabFrame(t,href)}
+SPLIT=right?{l:a,r:t,ratio}:{l:t,r:a,ratio};activateTab(t);layoutSplit();tabsChanged();return t}
+function closeSplit(){if(!SPLIT)return;SPLIT=null;layoutSplit();tabsChanged()}
+// The divider: dragged, each half keeps 320 px at least; double-clicked, they are even again; ←/→ move it by 5 %.
+function setSplitRatio(r){if(!SPLIT)return;const w=stage.getBoundingClientRect().width,min=w>640?320/w:.5;SPLIT.ratio=Math.min(Math.max(r,min),1-min);layoutSplit()}
+splitBar.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();splitBar.setPointerCapture(e.pointerId);splitBar.classList.add('split-drag');stage.classList.add('split-dragging')});
+splitBar.addEventListener('pointermove',e=>{if(!splitBar.hasPointerCapture(e.pointerId))return;const r=stage.getBoundingClientRect();setSplitRatio((e.clientX-r.left)/r.width)});
+function splitDragEnd(){if(!splitBar.classList.contains('split-drag'))return;splitBar.classList.remove('split-drag');stage.classList.remove('split-dragging');saveTabs()}
+splitBar.addEventListener('pointerup',splitDragEnd);splitBar.addEventListener('lostpointercapture',splitDragEnd);
+splitBar.addEventListener('dblclick',()=>{setSplitRatio(.5);saveTabs()});
+splitBar.addEventListener('keydown',e=>{const d=e.key==='ArrowLeft'?-.05:e.key==='ArrowRight'?.05:0;if(!d||!SPLIT)return;e.preventDefault();setSplitRatio(SPLIT.ratio+d);saveTabs()});
 drawTabs();"""
 
 
