@@ -433,6 +433,31 @@ class ViewerAndCitationTests(unittest.TestCase):
             self.assertIn("/_fs/capability/", html)
             self.assertEqual(assets, {str(behavior.resolve())})
 
+    def test_markup_built_inside_a_script_is_not_rewritten(self) -> None:
+        # A page that builds <img src="${...}"> in a template literal: rewriting it turned
+        # the expression into a /_fs path and every image broke (Cleo Sol's Song Shapes).
+        with tempfile.TemporaryDirectory() as raw:
+            root = Path(raw)
+            doc = root / "page.html"
+            (root / "behavior.js").write_text("", encoding="utf-8")
+            (root / "photo.jpg").write_bytes(b"jpg")
+            html, assets = prepare_html(
+                str(doc),
+                html_text=(
+                    '<html><body><img src="photo.jpg">'
+                    '<script src="behavior.js"></script>'
+                    '<script>el.innerHTML = `<img src="${COVERS[id]}"><audio src="a.m4a"></audio>`</script>'
+                    "</body></html>"
+                ),
+                server_origin="http://127.0.0.1:8899",
+                folder=str(root),
+                asset_token="capability",
+                allow_document_scripts=True,
+            )
+            self.assertIn('`<img src="${COVERS[id]}"><audio src="a.m4a"></audio>`', html)
+            self.assertEqual(html.count("/_fs/capability/"), 2)  # the page's own <img> and <script src>
+            self.assertEqual(assets, {str((root / "photo.jpg").resolve()), str((root / "behavior.js").resolve())})
+
     def test_remote_html_scripts_stay_inert_even_if_requested(self) -> None:
         html, _ = prepare_html(
             "https://example.com/article",

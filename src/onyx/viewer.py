@@ -57,6 +57,10 @@ _ASSET_RE = re.compile(
 # explicitly trusted a local HTML file. Re-serving foreign HTML same-origin on
 # localhost would otherwise let its inline JS read /_fs and /ask and exfiltrate.
 _SCRIPT_RE = re.compile(r"<script\b[^>]*>.*?</script\s*>|<script\b[^>]*/>", re.IGNORECASE | re.DOTALL)
+# A script element split into its opening tag, its body and its closing tag. The asset
+# rewrite runs on the tag (so <script src> still resolves) but never on the body: markup
+# a script builds, like `<img src="${url}">` in a template literal, is code, not a path.
+_SCRIPT_PARTS_RE = re.compile(r"(<script\b[^>]*>)(.*?)(</script\s*>)", re.IGNORECASE | re.DOTALL)
 _BASE_RE = re.compile(r"<base\b[^>]*>", re.IGNORECASE)
 _CSP_RE = re.compile(
     r'<meta\b[^>]*http-equiv=["\']?content-security-policy["\']?[^>]*>',
@@ -1233,7 +1237,12 @@ def prepare_html(
         )
         return m.group(1) + rewritten + m.group(2)
 
-    out = _ASSET_RE.sub(_sub, html_text)
+    parts, pos = [], 0
+    for m in _SCRIPT_PARTS_RE.finditer(html_text):
+        parts += [_ASSET_RE.sub(_sub, html_text[pos:m.start()]), _ASSET_RE.sub(_sub, m.group(1)), m.group(2), m.group(3)]
+        pos = m.end()
+    parts.append(_ASSET_RE.sub(_sub, html_text[pos:]))
+    out = "".join(parts)
 
     # Remote and untrusted documents stay inert. The /view route opts trusted local
     # HTML into scripts so buttons, tabs, diagrams, and other authored interactions
