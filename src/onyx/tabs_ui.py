@@ -25,7 +25,7 @@ Split view puts two tabs side by side (the row menu's Open in Split View, or ⌥
 of tabs, not a new kind of frame: both frames are shown, in the stage's two columns either side of a divider that drags,
 and the one last clicked into is the reader, so the sidebar, ⌘F, the outline and Back all act on it. There is one split
 at a time; bringing forward a tab outside it shows that tab alone, and bringing forward either of its tabs shows the
-pair again. Closing either tab, or Close Split in the ⌄ list or a pill's menu, ends it. A pill dragged down off the bar
+pair again. Closing either tab, the × on the divider, or Close Split in the ⌄ list or a pill's menu, ends it. A pill dragged down off the bar
 onto the page splits too: the half it is dropped on is where it goes; a pill's menu has Split Left and Split Right.
 
 Where a link opens lives here too, since the tabs are most of the answer: a plain ``target=reader`` link in the tab
@@ -96,7 +96,10 @@ body.tabs-pinned .tab-group,body.tabs-still .tab-group,body.tabs-still #reader-p
 #stage.split>iframe.split-l{grid-area:1/1} #stage.split>iframe.split-r{grid-area:1/3}
 #stage.split>iframe.split-l,#stage.split>iframe.split-r{box-sizing:border-box;border-top:2px solid transparent} #stage.split>iframe#reader{border-top-color:rgb(var(--accent)/.7)}
 #split-bar{grid-area:1/2;position:relative;z-index:2;background:var(--line);cursor:col-resize;touch-action:none} #split-bar[hidden]{display:none}
-#split-bar::before{content:'';position:absolute;inset:0 -4px} #split-bar:hover,#split-bar.split-drag,#split-bar:focus-visible{background:rgb(var(--accent)/.6);outline:none}
+#split-bar::before{content:'';position:absolute;inset:0 -4px}
+/* The way out, in sight: a small × riding the divider near its top, which ends the split (closeSplit). */
+#split-close{position:absolute;top:12px;left:50%;display:grid;place-items:center;width:22px;height:22px;padding:0;border:1px solid var(--line);border-radius:50%;background:rgb(var(--bg-elevated));color:rgb(var(--secondary));box-shadow:0 1px 4px rgb(0 0 0/.14);transform:translateX(-50%);cursor:default}
+#split-close:hover{color:rgb(var(--ink));background:rgb(var(--bg-elevated))} #split-close:focus-visible{outline:2px solid rgb(var(--accent));outline-offset:1px} #split-close svg{width:12px;height:12px} #split-bar:hover,#split-bar.split-drag,#split-bar:focus-visible{background:rgb(var(--accent)/.6);outline:none}
 #stage.split-dragging>iframe{pointer-events:none}
 /* A pill dragged down onto the page (tabSplitMode): a copy rides under the pointer, the pill it came from fades, and the
    half it would take is drawn over the page. */
@@ -409,6 +412,7 @@ t.href=href;t.src=move(t.src)||t.src;t.folder=move(t.folder)||t.folder;if(!t.fra
 // the stage the left one takes.
 const splitBar=document.createElement('div');splitBar.id='split-bar';splitBar.hidden=true;splitBar.tabIndex=0;
 splitBar.setAttribute('role','separator');splitBar.setAttribute('aria-orientation','vertical');splitBar.setAttribute('aria-label','Resize split');splitBar.title='Drag to resize · double-click to even';
+splitBar.innerHTML=`<button id=split-close type=button title="Close split" aria-label="Close split">${TAB_X}</button>`;splitBar.firstChild.onclick=()=>closeSplit();
 const splitDrop=document.createElement('div');splitDrop.id='split-drop';splitDrop.hidden=true;stage.append(splitBar,splitDrop);
 function splitPeer(t){return !SPLIT?null:t===SPLIT.l?SPLIT.r:t===SPLIT.r?SPLIT.l:null}
 function splitShowing(t){const a=TABS.active;return !!SPLIT&&(a===SPLIT.l||a===SPLIT.r)&&(t===SPLIT.l||t===SPLIT.r)}
@@ -440,12 +444,12 @@ if(!other)return;const ratio=SPLIT?SPLIT.ratio:.5;SPLIT=side==='l'?{l:t,r:other,
 function closeSplit(){if(!SPLIT)return;SPLIT=null;layoutSplit();tabsChanged()}
 // The divider: dragged, each half keeps 320 px at least; double-clicked, they are even again; ←/→ move it by 5 %.
 function setSplitRatio(r){if(!SPLIT)return;const w=stage.getBoundingClientRect().width,min=w>640?320/w:.5;SPLIT.ratio=Math.min(Math.max(r,min),1-min);layoutSplit()}
-splitBar.addEventListener('pointerdown',e=>{if(e.button!==0)return;e.preventDefault();splitBar.setPointerCapture(e.pointerId);splitBar.classList.add('split-drag');stage.classList.add('split-dragging')});
+splitBar.addEventListener('pointerdown',e=>{if(e.button!==0||e.target.closest('#split-close'))return;e.preventDefault();splitBar.setPointerCapture(e.pointerId);splitBar.classList.add('split-drag');stage.classList.add('split-dragging')});
 splitBar.addEventListener('pointermove',e=>{if(!splitBar.hasPointerCapture(e.pointerId))return;const r=stage.getBoundingClientRect();setSplitRatio((e.clientX-r.left)/r.width)});
 function splitDragEnd(){if(!splitBar.classList.contains('split-drag'))return;splitBar.classList.remove('split-drag');stage.classList.remove('split-dragging');saveTabs()}
 splitBar.addEventListener('pointerup',splitDragEnd);splitBar.addEventListener('lostpointercapture',splitDragEnd);
-splitBar.addEventListener('dblclick',()=>{setSplitRatio(.5);saveTabs()});
-splitBar.addEventListener('keydown',e=>{const d=e.key==='ArrowLeft'?-.05:e.key==='ArrowRight'?.05:0;if(!d||!SPLIT)return;e.preventDefault();setSplitRatio(SPLIT.ratio+d);saveTabs()});
+splitBar.addEventListener('dblclick',e=>{if(e.target.closest('#split-close'))return;setSplitRatio(.5);saveTabs()});
+splitBar.addEventListener('keydown',e=>{if(e.target!==splitBar)return;const d=e.key==='ArrowLeft'?-.05:e.key==='ArrowRight'?.05:0;if(!d||!SPLIT)return;e.preventDefault();setSplitRatio(SPLIT.ratio+d);saveTabs()});
 drawTabs();"""
 
 

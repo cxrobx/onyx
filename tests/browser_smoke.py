@@ -5148,6 +5148,16 @@ class BrowserSmokeTests(unittest.TestCase):
                         sorted(page.evaluate("[SPLIT.l.title, SPLIT.r.title]")), ["Three", "Two"]
                     )
 
+                    # The × on the divider ends the split; both tabs stay open.
+                    reader = page.evaluate("TABS.active.title")
+                    page.locator("#split-close").click()
+                    expect(bar).to_be_hidden()
+                    self.assertIsNone(page.evaluate("SPLIT"))
+                    self.assertEqual(page.evaluate("TABS.active.title"), reader)
+                    page.evaluate("activateTab(TABS.list.find(t => t.title === 'Three'))")
+                    page.evaluate("href => openSplit(href)", f"/view?src={urllib.parse.quote(str(two))}")
+                    expect(bar).to_be_visible()
+
                     # Closing a half ends the split; the other half is left reading alone.
                     page.evaluate("closeTab(SPLIT.r)")
                     expect(bar).to_be_hidden()
