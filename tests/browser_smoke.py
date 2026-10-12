@@ -5216,6 +5216,17 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.evaluate("closeSplit(); activateTab(TABS.list.find(t => t.title === 'Two'))")
                     drag("Two", right_x)
                     page.wait_for_function("() => SPLIT && SPLIT.r.title === 'Two' && SPLIT.l.title === 'Three'")
+
+                    # A pill's menu does the same: Split Left puts One beside the page being read; Close Split ends it.
+                    page.evaluate("closeSplit(); activateTab(TABS.list.find(t => t.title === 'Three'))")
+                    pills.filter(has_text="One").click(button="right")
+                    page.get_by_role("menuitem", name="Split Left").click()
+                    page.wait_for_function("() => SPLIT && SPLIT.l.title === 'One' && SPLIT.r.title === 'Three'")
+                    pills.filter(has_text="Two").click(button="right")
+                    page.get_by_role("menuitem", name="Close Split").click()
+                    page.wait_for_function("() => SPLIT === null")
+                    expect(page.locator("#split-bar")).to_be_hidden()
+                    self.assertEqual(pills.count(), 3)
                     browser.close()
 
         self.assertEqual(page_errors, [])

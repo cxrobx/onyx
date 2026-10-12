@@ -25,8 +25,8 @@ Split view puts two tabs side by side (the row menu's Open in Split View, or ⌥
 of tabs, not a new kind of frame: both frames are shown, in the stage's two columns either side of a divider that drags,
 and the one last clicked into is the reader, so the sidebar, ⌘F, the outline and Back all act on it. There is one split
 at a time; bringing forward a tab outside it shows that tab alone, and bringing forward either of its tabs shows the
-pair again. Closing either tab, or Close Split in the ⌄ list, ends it. A pill dragged down off the bar onto the page
-splits too: the half it is dropped on is where it goes.
+pair again. Closing either tab, or Close Split in the ⌄ list or a pill's menu, ends it. A pill dragged down off the bar
+onto the page splits too: the half it is dropped on is where it goes; a pill's menu has Split Left and Split Right.
 
 Where a link opens lives here too, since the tabs are most of the answer: a plain ``target=reader`` link in the tab
 showing, a modified click in a tab of its own, and a link that leaves Onyx in the user's browser, never in the app.
@@ -291,6 +291,16 @@ tabList.onclick=()=>{if(!window.OnyxMenu)return;const r=tabList.getBoundingClien
 items.push({separator:true});if(SPLIT)items.push({id:'close-split',label:'Close Split'});items.push({id:'close-others',label:'Close Other Tabs',enabled:TABS.list.length>1});tabMenuOpen=true;tabList.setAttribute('aria-expanded','true');
 OnyxMenu.open({items,x:r.left,y:r.bottom+4,label:'Tabs',returnFocus:tabList,onClose:()=>{tabMenuOpen=false;tabList.setAttribute('aria-expanded','false');if(!tabsOver)tabsLater()},
 onSelect:id=>{if(id==='close-split')closeSplit();else if(id==='close-others')closeOtherTabs();else activateTab(tabById(+id.slice(4)))}})};
+// A pill's own menu (right-click): put its tab in a half of the split (splitWith, as a drag onto the page does), end the
+// split, or close tabs. The bar stays out while it is open, as for the ⌄ list.
+tabStrip.addEventListener('contextmenu',e=>{const p=e.target.closest('.tab'),t=p&&tabById(+p.dataset.id);if(!t||!window.OnyxMenu)return;e.preventDefault();
+// WebKit on macOS selects the word under a right-click before this fires (for Look Up); a pill isn't text to select.
+const sel=getSelection();if(sel&&sel.anchorNode&&tabStrip.contains(sel.anchorNode))sel.removeAllRanges();
+let x=e.clientX,y=e.clientY;if(!x&&!y){const r=p.getBoundingClientRect();x=r.left+16;y=r.bottom}
+const can=!!t.href&&TABS.list.some(o=>o!==t&&o.href),items=[{id:'split-l',label:'Split Left',enabled:can},{id:'split-r',label:'Split Right',enabled:can}];
+if(SPLIT)items.push({id:'close-split',label:'Close Split'});items.push({separator:true},{id:'close',label:'Close Tab'},{id:'close-others',label:'Close Other Tabs',enabled:TABS.list.length>1});
+tabMenuOpen=true;OnyxMenu.open({items,x,y,label:'Tab actions',returnFocus:p,onClose:()=>{tabMenuOpen=false;if(!tabsOver)tabsLater()},
+onSelect:id=>{if(id==='split-l'||id==='split-r')splitWith(t,id.slice(-1));else if(id==='close-split')closeSplit();else if(id==='close')closeTab(t);else if(id==='close-others'){activateTab(t);closeOtherTabs()}}})});
 // MARK: tab bar reveal and pin — as the sidebar's (a 40 ms beat to come out, 400 ms of grace to go, polled again while in
 // use), watched from the reader's own pointer moves as the outline's edge is; on the home page, from the stage's.
 const TABBAR_KEY='askw:vault:tabbar';let tabsOver=false,tabsTimer=0,tabsAtEdge=false;
