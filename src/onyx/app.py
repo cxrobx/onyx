@@ -1097,6 +1097,42 @@ def create_app(config: AppConfig) -> FastAPI:
         notes = await asyncio.to_thread(suggest)
         return JSONResponse({"ok": True, "notes": notes}, headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/source/tags")
+    async def note_tags(request: Request, edit: str):
+        """The tags a ``#`` typed in the editor can be: those used in the edited note's vault, the most used first."""
+        if denied := api_forbidden(request):
+            return denied
+        opened = editing(edit)
+        if not opened:
+            return JSONResponse({"ok": False, "error": "Reload this page to suggest tags."}, status_code=403)
+
+        def gather() -> list[dict]:
+            notes = opened.get("notes")
+            index = app.state.vault.get(Path(notes)) if notes else None
+            return [{"tag": tag, "count": n} for tag, n in vault.vault_tags(index)[:2000]] if index else []
+
+        tags = await asyncio.to_thread(gather)
+        return JSONResponse({"ok": True, "tags": tags}, headers={"Cache-Control": "no-store"})
+
+    @app.get("/api/source/headings")
+    async def note_headings(request: Request, edit: str, note: str):
+        """The headings of the note ``[[note#`` names, found as a click on that link would find it: their text, never
+        the note's."""
+        if denied := api_forbidden(request):
+            return denied
+        opened = editing(edit)
+        if not opened:
+            return JSONResponse({"ok": False, "error": "Reload this page to suggest headings."}, status_code=403)
+
+        def gather() -> list[dict]:
+            notes = opened.get("notes")
+            index = app.state.vault.get(Path(notes)) if notes else None
+            found = index.resolve_wikilink(note[:500], source=Path(opened["display"])) if index else None
+            return [{"level": level, "text": text} for level, text in vault.note_headings(found.path)] if found else []
+
+        headings = await asyncio.to_thread(gather)
+        return JSONResponse({"ok": True, "headings": headings}, headers={"Cache-Control": "no-store"})
+
     # MARK: - Library, settings, and diagnostics APIs
 
     def api_forbidden(request: Request) -> JSONResponse | None:

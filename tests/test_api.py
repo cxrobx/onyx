@@ -641,6 +641,34 @@ class VaultApiTests(unittest.TestCase):
         loose = self.client.get("/api/source", params={"src": str(loose_note.resolve()), "cap": loose_cap}).json()
         self.assertEqual(suggest("a", loose["edit"]).json()["notes"], [])
 
+    def test_hash_suggests_the_vaults_tags_and_note_hash_its_headings(self) -> None:
+        self.set_vault(str(self.vault))
+        (self.vault / "Beta.md").write_text(
+            "---\ntags: [career, '#money']\n---\n\n# Beta\n\nOn #career and #Money/tax, not #2026 or a#b.\n\n"
+            "```\n#not-a-tag\n# Not a heading\n```\n\nSee `#code` too.\n\n## Plan ##\n\n### Steps\n",
+            encoding="utf-8",
+        )
+        note = self.vault / "notes" / "Alpha.md"
+        page = self.client.get("/view", params={"src": str(note), "folder": str(self.vault)})
+        cap = re.search(r'name="askw-doc-token" content="([^"]+)"', page.text).group(1)
+        edit = self.client.get("/api/source", params={"src": str(note.resolve()), "cap": cap}).json()["edit"]
+
+        tags = self.client.get("/api/source/tags", params={"edit": edit}).json()["tags"]
+        # Alpha's property and Beta's; a note's tag counts once however often it says it; code and digits aren't tags.
+        self.assertEqual(tags[0], {"tag": "career", "count": 2})
+        self.assertEqual({t["tag"] for t in tags}, {"career", "money", "Money/tax"})
+        self.assertEqual(self.client.get("/api/source/tags", params={"edit": "forged"}).status_code, 403)
+
+        def headings(target: str, key: str = edit):
+            return self.client.get("/api/source/headings", params={"edit": key, "note": target})
+
+        self.assertEqual(
+            headings("Beta").json()["headings"],
+            [{"level": 1, "text": "Beta"}, {"level": 2, "text": "Plan"}, {"level": 3, "text": "Steps"}],
+        )
+        self.assertEqual(headings("Nowhere").json()["headings"], [])
+        self.assertEqual(headings("Beta", "forged").status_code, 403)
+
     def test_a_note_edited_through_a_linked_folder_saves_to_its_real_file_and_follows_its_links(self) -> None:
         self.set_vault(str(self.vault))
         note = self.vault / "linked" / "L.md"

@@ -1171,6 +1171,75 @@ class VaultIndex:
         return results[:limit], len(results) > limit
 
 
+# MARK: - Tags and headings, for the editor's suggesters
+
+# `#tag` as Obsidian reads one: after a space, a bracket or the line's start, letters, digits, `_`, `-` and `/`, and
+# not digits alone. Code is left out, as it is on the page.
+_TAG_RE = re.compile(r"(?<![^\s(])#(\w[\w/-]*)")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,}).*?^ {0,3}\1[ \t]*$", re.M | re.S)
+_INLINE_CODE_RE = re.compile(r"(`+)[^`\n]+?\1")
+_HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$", re.M)
+_MAX_NOTE_BYTES = 2_000_000
+_note_tags: dict[str, tuple[tuple[int, int], tuple[str, ...]]] = {}
+_note_tags_lock = threading.Lock()
+
+
+def _note_text(path: Path) -> tuple[str | None, str]:
+    """A note's frontmatter block and its body with code taken out; empty for one too big or unreadable."""
+    try:
+        if path.stat().st_size > _MAX_NOTE_BYTES:
+            return None, ""
+        raw = path.read_text(encoding="utf-8", errors="replace")
+    except OSError:
+        return None, ""
+    block, body = viewer.split_frontmatter(raw)
+    return block, _FENCE_RE.sub("", body)
+
+
+def note_tags(path: Path) -> tuple[str, ...]:
+    """The tags one note carries, in its text and its ``tags`` property, remembered until the file changes."""
+    try:
+        st = path.stat()
+    except OSError:
+        return ()
+    stamp, key = (st.st_mtime_ns, st.st_size), str(path)
+    with _note_tags_lock:
+        known = _note_tags.get(key)
+    if known and known[0] == stamp:
+        return known[1]
+    block, body = _note_text(path)
+    found = [t for t in _TAG_RE.findall(_INLINE_CODE_RE.sub("", body)) if not t.isdigit()]
+    fields = viewer.parse_flat_frontmatter(block) if block else None
+    for name in ("tags", "tag"):
+        value = (fields or {}).get(name)
+        items = value if isinstance(value, list) else re.split(r"[,\s]+", value or "")
+        found += [item.strip().lstrip("#") for item in items if item.strip().lstrip("#")]
+    tags = tuple(dict.fromkeys(found))
+    with _note_tags_lock:
+        _note_tags[key] = (stamp, tags)
+    return tags
+
+
+def vault_tags(index: VaultIndex) -> list[tuple[str, int]]:
+    """Every tag in a notes vault, with how many notes carry it, the most used first."""
+    counts: dict[str, int] = {}
+    spelled: dict[str, str] = {}
+    for item in index.notes:
+        if item.kind != "note" or item.missing or item.path.suffix.lower() not in {".md", ".markdown"}:
+            continue
+        for tag in note_tags(item.path):
+            key = tag.casefold()
+            spelled.setdefault(key, tag)
+            counts[key] = counts.get(key, 0) + 1
+    return sorted(((spelled[k], n) for k, n in counts.items()), key=lambda t: (-t[1], t[0].casefold()))
+
+
+def note_headings(path: Path) -> list[tuple[int, str]]:
+    """A note's headings, level and text, in order."""
+    _, body = _note_text(path)
+    return [(len(m.group(1)), m.group(2).strip()) for m in _HEADING_RE.finditer(body)]
+
+
 class VaultCache:
     """Rebuilds each index at most once per ``ttl`` seconds; thread-safe.
 

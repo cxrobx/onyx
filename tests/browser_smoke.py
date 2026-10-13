@@ -3363,8 +3363,8 @@ class BrowserSmokeTests(unittest.TestCase):
         (notes / "Projects").mkdir(parents=True, exist_ok=True)
         note = notes / "Typing.md"
         note.write_text("start\n", encoding="utf-8")
-        (notes / "Projects" / "Roadmap.md").write_text("# Roadmap\n", encoding="utf-8")
-        (notes / "Reading List.md").write_text("# Reading\n", encoding="utf-8")
+        (notes / "Projects" / "Roadmap.md").write_text("# Roadmap\n\n## Milestones\n\nOn #onyx/plan.\n", encoding="utf-8")
+        (notes / "Reading List.md").write_text("# Reading\n\nSee #reading.\n", encoding="utf-8")
         self.app.state.storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
         self.app.state.vault.invalidate()
         cases = [
@@ -3389,6 +3389,10 @@ class BrowserSmokeTests(unittest.TestCase):
             ("See |", ["type:[[road"], "See [[road|]]"),
             ("See |", ["type:[[road", "Enter"], "See [[Roadmap]]|"),
             ("See |", ["type:[[read", "Tab", "type: next"], "See [[Reading List]] next|"),
+            ("See |", ["type:[[Roadmap#mil", "Enter"], "See [[Roadmap#Milestones]]|"),
+            ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
+            ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
+            ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
         ]
         shown = """() => { const t = askwEditor.text(), s = askwEditor.selection();
           return s.from === s.to ? t.slice(0, s.from) + '|' + t.slice(s.from)
@@ -3420,7 +3424,7 @@ class BrowserSmokeTests(unittest.TestCase):
                             if key.startswith("type:"):
                                 page.keyboard.type(key[5:])
                             else:
-                                if key in ("Enter", "Tab") and "[[" in "".join(keys):
+                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys)):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
                                 page.keyboard.press(key)
                         if after.endswith("|]]") and "[[" in after:
@@ -3428,6 +3432,9 @@ class BrowserSmokeTests(unittest.TestCase):
                             expect(frame.locator(".cm-tooltip-autocomplete li").first).to_contain_text("Roadmap")
                             expect(frame.locator(".cm-tooltip-autocomplete li").first).to_contain_text("Projects")
                             page.keyboard.press("Escape")
+                        if before.startswith("```"):
+                            page.wait_for_timeout(300)
+                            expect(frame.locator(".cm-tooltip-autocomplete")).to_have_count(0)
                         self.assertEqual(reader.evaluate(shown), after, (engine, before, keys))
                     browser.close()
         self.assertEqual(page_errors, [])

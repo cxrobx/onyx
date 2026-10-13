@@ -16,7 +16,7 @@ import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer
 import { lineChanges } from "./diff";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { CSS } from "./style";
-import { noteLinks, NoteName } from "./suggest";
+import { suggesters } from "./suggest";
 import { typing } from "./typing";
 
 /**
@@ -297,6 +297,12 @@ export async function open(options: OpenOptions): Promise<Session> {
     paint();
   }
 
+  // What the suggesters ask the server for (suggest.ts), through this note's edit capability; nothing when it can't say.
+  function lookup(route: string, params: Record<string, string>, key: string) {
+    return fetch(`${server}/api/source/${route}?${new URLSearchParams({ edit, ...params })}`, { cache: "no-store" })
+      .then((r) => r.json()).then((d) => (d.ok ? d[key] : [])).catch(() => []);
+  }
+
   const view = new EditorView({
     parent: host,
     state: EditorState.create({
@@ -310,8 +316,11 @@ export async function open(options: OpenOptions): Promise<Session> {
         findMarks,
         imageSource.of(images),
         keymap.of([{ key: "Mod-s", run: () => { save(); return true; }, preventDefault: true }]),
-        noteLinks((q) => fetch(`${server}/api/source/notes?${new URLSearchParams({ edit, q })}`, { cache: "no-store" })
-          .then((r) => r.json()).then((d) => (d.ok ? d.notes as NoteName[] : [])).catch(() => [])),
+        suggesters({
+          notes: (q) => lookup("notes", { q }, "notes"),
+          headings: (note) => lookup("headings", { note }, "headings"),
+          tags: () => lookup("tags", {}, "tags"),
+        }),
         typing,
         keymap.of(historyKeymap),
         EditorView.contentAttributes.of({ spellcheck: "true", autocorrect: "on", autocapitalize: "sentences" }),
