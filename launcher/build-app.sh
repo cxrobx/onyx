@@ -117,7 +117,11 @@ rm -f "$ALFRED_WORKFLOW"
   "$ROOT/integrations/alfred/info.plist" "$ROOT/integrations/alfred/onyx_search.py" "$BUILD/icon.png"
 
 echo "→ Compiling Swift…"
-swiftc -F "$SPARKLE_DIR" -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -framework Sparkle \
+# Built for the oldest macOS Info.plist admits, not the SDK's own: a newer SDK otherwise targets its own release and
+# refuses the APIs that release removed (CGWindowListCreateImage, with the macOS 27 SDK).
+MIN_MACOS="$(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$DIR/Info.plist")"
+swiftc -target "$BUILD_ARCH-apple-macos$MIN_MACOS" \
+  -F "$SPARKLE_DIR" -framework Cocoa -framework WebKit -framework UniformTypeIdentifiers -framework Sparkle \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks -O \
   "$DIR/Onyx.swift" -o "$BUNDLE/Contents/MacOS/$BIN_NAME"
 # ditto keeps the framework's Versions/Current symlinks, which a plain file copy flattens and breaks.
