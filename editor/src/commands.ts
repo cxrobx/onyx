@@ -6,6 +6,7 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, StateCommand } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
+import { narrow } from "./match";
 import { insertLink, LEAD, toggleCheckbox, toggleComment, toggleWrap } from "./typing";
 
 // Each line the selection touches, rewritten by `change` (given its text and its place among them), the cursor kept
@@ -122,10 +123,12 @@ export async function slashSource(context: CompletionContext): Promise<Completio
   for (let node = syntaxTree(context.state).resolveInner(slash, -1) as { name: string; parent: unknown } | null; node; node = node.parent as typeof node) {
     if (/Code|Frontmatter|URL/.test(node.name)) return null;
   }
+  const commands = narrow(COMMANDS, typed.text.slice(typed.text.indexOf("/") + 1), (c) => c.name);
+  if (!commands.length) return null;
   return {
     from: slash + 1,
-    validFor: /^[\p{L}\p{N}-]*$/u,
-    options: COMMANDS.map((c) => ({
+    filter: false,
+    options: commands.map((c) => ({
       label: c.name,
       detail: c.key,
       apply(view: EditorView, _c: Completion, _from: number, to: number) {

@@ -10,6 +10,7 @@ import { EditorState, Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
 import { slashSource } from "./commands";
+import { narrow } from "./match";
 
 export interface NoteName { name: string; folder: string; link: string }
 export interface Heading { level: number; text: string }
@@ -64,15 +65,24 @@ export function suggesters(lookups: Lookups): Extension {
   // Asked for as the editor opens: the first walk of a big vault takes a second, and the first `#` shouldn't wait it out.
   const tagList = lookups.tags().catch(() => [] as TagCount[]);
 
+  // A note's headings, asked for once per name while the editor is open.
+  const headingCache = new Map<string, Promise<Heading[]>>();
+  function headingsOf(note: string): Promise<Heading[]> {
+    const key = note.trim().toLowerCase();
+    if (!headingCache.has(key)) headingCache.set(key, lookups.headings(note).catch(() => []));
+    return headingCache.get(key)!;
+  }
+
   async function headingsSource(context: CompletionContext): Promise<CompletionResult | null> {
     const typed = context.matchBefore(/\[\[[^[\]|#^\n]*#[^[\]|#^\n]*$/);
     if (!typed) return null;
     const hash = typed.text.indexOf("#"), note = typed.text.slice(2, hash);
-    const list = note.trim() ? await lookups.headings(note) : ownHeadings(context.state);
+    const all = note.trim() ? await headingsOf(note) : ownHeadings(context.state);
+    const list = narrow(all, typed.text.slice(hash + 1), (h) => h.text);
     if (context.aborted || !list.length) return null;
     return {
       from: typed.from + hash + 1,
-      validFor: /^[^[\]|#^\n]*$/,
+      filter: false,
       // The note's name, as typed, and the heading go in together.
       options: list.map((h) => ({ label: linkText(h.text), detail: "H" + h.level, apply: intoLink(note + "#" + linkText(h.text), typed.from + 2) })),
     };
@@ -95,15 +105,14 @@ export function suggesters(lookups: Lookups): Extension {
     if (!typed) return null;
     const hash = typed.from + typed.text.indexOf("#");
     if (inCode(context.state, hash)) return null;
-    const tags = await tagList;
+    const tags = narrow(await tagList, typed.text.slice(typed.text.indexOf("#") + 1), (t) => t.tag).slice(0, 50);
     if (context.aborted || !tags.length) return null;
     return {
       from: hash + 1,
-      validFor: /^[\p{L}\p{N}_/-]*$/u,
-      options: tags.map((t, i) => ({
+      filter: false,  // narrowed above, the most used first among equal matches
+      options: tags.map((t) => ({
         label: t.tag,
         detail: String(t.count),
-        boost: Math.max(-99, -i),  // the most used first, among equally good matches
         apply: (view: EditorView, _c: Completion, from: number, to: number) => {
           const spaced = /\s/.test(view.state.sliceDoc(to, to + 1));
           view.dispatch({

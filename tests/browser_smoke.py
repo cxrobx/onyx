@@ -3398,6 +3398,9 @@ class BrowserSmokeTests(unittest.TestCase):
             ("|", ["type:/checkl", "Enter", "type:x"], "- [ ] x|"),
             ("|", ["type:/table", "Enter", "type:A"], "| A| |  |\n| --- | --- |\n|  |  |"),  # `| A |  |`, the cursor after A
             ("|", ["type:/ x"], "/ x|"),
+            # Names hold what was typed, not its letters in order: nothing like it, no list, and Enter is a new line.
+            ("|", ["type:/usr", "Enter"], "/usr\n|"),
+            ("Tagged |", ["type:#onyxplan", "Enter"], "Tagged #onyxplan\n|"),
             # Pasted HTML comes in as Markdown; HTML with nothing to keep, or pasted into code, as its plain text.
             ("|", ["html:<p>Read <a href='https://x.com/a'>the docs</a>, <strong>now</strong>.</p><ul><li>one<ul><li>deep</li></ul></li></ul>"
                    "\0Read the docs, now."], "Read [the docs](https://x.com/a), **now**.\n\n- one\n\t- deep|"),
@@ -3445,7 +3448,8 @@ class BrowserSmokeTests(unittest.TestCase):
                                   document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
                                 }""", [html, plain])
                             else:
-                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)):
+                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)) \
+                                        and not after.endswith("\n|"):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
                                 page.keyboard.press(key)
                         if after.endswith("|]]") and "[[" in after:
