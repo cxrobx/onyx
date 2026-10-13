@@ -13,12 +13,14 @@ import { slashSource } from "./commands";
 import { narrow } from "./match";
 
 export interface NoteName { name: string; folder: string; link: string }
-export interface Heading { level: number; text: string }
+export interface Heading { level: number; text: string; link?: string; folder?: string }
 export interface TagCount { tag: string; count: number }
 
 export interface Lookups {
   notes(query: string): Promise<NoteName[]>;
   headings(note: string): Promise<Heading[]>;
+  /** Every heading in the vault, each with its note's link (`[[##`). */
+  allHeadings(): Promise<Heading[]>;
   tags(): Promise<TagCount[]>;
 }
 
@@ -102,6 +104,27 @@ export function suggesters(lookups: Lookups): Extension {
     return note.trim() ? whenLoaded(headingsOf(note), answer) : answer(ownHeadings(context.state));
   }
 
+  // `[[##`: headings across the vault, asked for on the first one typed and narrowed from then on.
+  let vaultHeadings: Loaded<Heading[]> | null = null;
+  function vaultHeadingsSource(context: CompletionContext) {
+    const typed = context.matchBefore(/\[\[##[^[\]|#^\n]*$/);
+    if (!typed) return null;
+    vaultHeadings ??= load(lookups.allHeadings(), []);
+    return whenLoaded(vaultHeadings, (all): CompletionResult | null => {
+      const list = narrow(all, typed.text.slice(4), (h) => h.text).slice(0, 50);
+      if (!list.length) return null;
+      return {
+        from: typed.from + 4,
+        filter: false,
+        options: list.map((h) => ({
+          label: linkText(h.text),
+          detail: h.link,
+          apply: intoLink(`${h.link}#${linkText(h.text)}`, typed.from + 2),
+        })),
+      };
+    });
+  }
+
   function notesSource(context: CompletionContext) {
     const typed = context.matchBefore(/\[\[[^[\]|#^\n]*$/);
     if (!typed) return null;
@@ -147,7 +170,7 @@ export function suggesters(lookups: Lookups): Extension {
   }
 
   return [
-    autocompletion({ override: [headingsSource, notesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
+    autocompletion({ override: [vaultHeadingsSource, headingsSource, notesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
     Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
   ];
 }

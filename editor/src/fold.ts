@@ -3,9 +3,9 @@
 // the text, shown faintly while the pointer is over the note, fully over the arrow, and always on a folded line; a
 // folded line ends in "…", and a click on either opens it. CodeMirror's Markdown parser would also fold code blocks
 // and quotes, which Obsidian doesn't, so those are turned off where the language is built (main.ts).
-import { codeFolding, ensureSyntaxTree, foldGutter, foldKeymap, foldService, syntaxTree } from "@codemirror/language";
+import { codeFolding, ensureSyntaxTree, foldable, foldedRanges, foldEffect, foldGutter, foldKeymap, foldService, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { EditorState, Extension } from "@codemirror/state";
-import { keymap } from "@codemirror/view";
+import { EditorView, keymap, ViewPlugin, ViewUpdate } from "@codemirror/view";
 
 const HEADING = /^(?:ATX|Setext)Heading(\d)$/;
 
@@ -85,3 +85,44 @@ export const folding: Extension = [
   }),
   keymap.of(foldKeymap),
 ];
+
+// A note's folds come back the next time it is opened for editing, as Obsidian keeps them: each by its line's number
+// and text, so one whose line moved (an edit elsewhere) is found by its text, and one whose line is gone is dropped.
+// Kept in the app's own storage, never in the note.
+interface Kept { line: number; text: string }
+export function rememberFolds(key: string): Extension {
+  return ViewPlugin.fromClass(class {
+    constructor(readonly view: EditorView) {
+      // After the first update: a view can't be dispatched to while it is being made.
+      queueMicrotask(() => this.restore());
+    }
+    restore() {
+      let kept: Kept[] = [];
+      try { kept = JSON.parse(localStorage.getItem(key) || "[]"); } catch (e) { return; }
+      if (!Array.isArray(kept) || !kept.length) return;
+      const { state } = this.view, doc = state.doc;
+      ensureSyntaxTree(state, doc.length, 200);
+      const effects = [];
+      for (const { line, text } of kept) {
+        let at = line >= 1 && line <= doc.lines && doc.line(line).text === text ? doc.line(line) : null;
+        for (let n = 1; !at && n <= doc.lines; n++) if (doc.line(n).text === text) at = doc.line(n);
+        const range = at && foldable(state, at.from, at.to);
+        if (range) effects.push(foldEffect.of(range));
+      }
+      if (effects.length) this.view.dispatch({ effects });
+    }
+    update(u: ViewUpdate) {
+      const folding = u.transactions.some((t) => t.effects.some((e) => e.is(foldEffect) || e.is(unfoldEffect)));
+      if (!folding && !(u.docChanged && foldedRanges(u.state).size)) return;
+      const doc = u.state.doc, kept: Kept[] = [];
+      foldedRanges(u.state).between(0, doc.length, (from) => {
+        const line = doc.lineAt(from);
+        kept.push({ line: line.number, text: line.text });
+      });
+      try {
+        if (kept.length) localStorage.setItem(key, JSON.stringify(kept));
+        else localStorage.removeItem(key);
+      } catch (e) { /* storage full or off: folds just aren't kept */ }
+    }
+  });
+}

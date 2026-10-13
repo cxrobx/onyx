@@ -1246,8 +1246,9 @@ _FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,}).*?^ {0,3}\1[ \t]*$", re.M | re.S)
 _INLINE_CODE_RE = re.compile(r"(`+)[^`\n]+?\1")
 _HEADING_RE = re.compile(r"^ {0,3}(#{1,6})[ \t]+(.+?)(?:[ \t]+#+)?[ \t]*$", re.M)
 _MAX_NOTE_BYTES = 2_000_000
-_note_tags: dict[str, tuple[tuple[int, int], tuple[str, ...]]] = {}
-_note_tags_lock = threading.Lock()
+_NoteMeta = tuple[tuple[str, ...], tuple[tuple[int, str], ...]]
+_note_meta_cache: dict[str, tuple[tuple[int, int], _NoteMeta]] = {}
+_note_meta_lock = threading.Lock()
 
 
 def _note_text(path: Path) -> tuple[str | None, str]:
@@ -1262,15 +1263,16 @@ def _note_text(path: Path) -> tuple[str | None, str]:
     return block, _FENCE_RE.sub("", body)
 
 
-def note_tags(path: Path) -> tuple[str, ...]:
-    """The tags one note carries, in its text and its ``tags`` property, remembered until the file changes."""
+def _note_meta(path: Path) -> _NoteMeta:
+    """A note's tags (in its text and its ``tags`` property) and headings (level, text), read in one pass and
+    remembered until the file changes, so after a vault's first walk a request only stats it."""
     try:
         st = path.stat()
     except OSError:
-        return ()
+        return (), ()
     stamp, key = (st.st_mtime_ns, st.st_size), str(path)
-    with _note_tags_lock:
-        known = _note_tags.get(key)
+    with _note_meta_lock:
+        known = _note_meta_cache.get(key)
     if known and known[0] == stamp:
         return known[1]
     block, body = _note_text(path)
@@ -1280,19 +1282,32 @@ def note_tags(path: Path) -> tuple[str, ...]:
         value = (fields or {}).get(name)
         items = value if isinstance(value, list) else re.split(r"[,\s]+", value or "")
         found += [item.strip().lstrip("#") for item in items if item.strip().lstrip("#")]
-    tags = tuple(dict.fromkeys(found))
-    with _note_tags_lock:
-        _note_tags[key] = (stamp, tags)
-    return tags
+    meta = (tuple(dict.fromkeys(found)), tuple((len(m.group(1)), m.group(2).strip()) for m in _HEADING_RE.finditer(body)))
+    with _note_meta_lock:
+        _note_meta_cache[key] = (stamp, meta)
+    return meta
+
+
+def note_tags(path: Path) -> tuple[str, ...]:
+    """The tags one note carries."""
+    return _note_meta(path)[0]
+
+
+def note_headings(path: Path) -> list[tuple[int, str]]:
+    """A note's headings, level and text, in order."""
+    return list(_note_meta(path)[1])
+
+
+def _markdown_notes(index: VaultIndex) -> list[VaultFile]:
+    return [item for item in index.notes
+            if item.kind == "note" and not item.missing and item.path.suffix.lower() in {".md", ".markdown"}]
 
 
 def vault_tags(index: VaultIndex) -> list[tuple[str, int]]:
     """Every tag in a notes vault, with how many notes carry it, the most used first."""
     counts: dict[str, int] = {}
     spelled: dict[str, str] = {}
-    for item in index.notes:
-        if item.kind != "note" or item.missing or item.path.suffix.lower() not in {".md", ".markdown"}:
-            continue
+    for item in _markdown_notes(index):
         for tag in note_tags(item.path):
             key = tag.casefold()
             spelled.setdefault(key, tag)
@@ -1300,10 +1315,22 @@ def vault_tags(index: VaultIndex) -> list[tuple[str, int]]:
     return sorted(((spelled[k], n) for k, n in counts.items()), key=lambda t: (-t[1], t[0].casefold()))
 
 
-def note_headings(path: Path) -> list[tuple[int, str]]:
-    """A note's headings, level and text, in order."""
-    _, body = _note_text(path)
-    return [(len(m.group(1)), m.group(2).strip()) for m in _HEADING_RE.finditer(body)]
+def vault_headings(index: VaultIndex, query: str, *, limit: int = 50) -> list[tuple[VaultFile, int, str]]:
+    """Headings across a notes vault that hold ``query`` (case aside), those starting with it first: what ``[[##``
+    offers. Each with its note."""
+    q = query.strip().casefold()
+    starts: list[tuple[VaultFile, int, str]] = []
+    holds: list[tuple[VaultFile, int, str]] = []
+    for item in _markdown_notes(index):
+        for level, text in note_headings(item.path):
+            key = text.casefold()
+            if not q or key.startswith(q):
+                starts.append((item, level, text))
+            elif q in key:
+                holds.append((item, level, text))
+        if not q and len(starts) >= limit:
+            break
+    return (starts + holds)[:limit]
 
 
 class VaultCache:

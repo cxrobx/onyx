@@ -1160,9 +1160,9 @@ def create_app(config: AppConfig) -> FastAPI:
         return JSONResponse({"ok": True, "tags": tags}, headers={"Cache-Control": "no-store"})
 
     @app.get("/api/source/headings")
-    async def note_headings(request: Request, edit: str, note: str):
+    async def note_headings(request: Request, edit: str, note: str = "", q: str = "", limit: int = 50):
         """The headings of the note ``[[note#`` names, found as a click on that link would find it: their text, never
-        the note's."""
+        the note's. With no note, ``[[##``: the headings across the vault that hold ``q``, each with its note's link."""
         if denied := api_forbidden(request):
             return denied
         opened = editing(edit)
@@ -1172,7 +1172,12 @@ def create_app(config: AppConfig) -> FastAPI:
         def gather() -> list[dict]:
             notes = opened.get("notes")
             index = app.state.vault.get(Path(notes)) if notes else None
-            found = index.resolve_wikilink(note[:500], source=Path(opened["display"])) if index else None
+            if index is None:
+                return []
+            if not note.strip():
+                return [{"level": level, "text": text, "link": index.link_target(item), "folder": item.folder}
+                        for item, level, text in vault.vault_headings(index, q[:200], limit=min(max(limit, 1), 20000))]
+            found = index.resolve_wikilink(note[:500], source=Path(opened["display"]))
             return [{"level": level, "text": text} for level, text in vault.note_headings(found.path)] if found else []
 
         headings = await asyncio.to_thread(gather)

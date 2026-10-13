@@ -15,7 +15,7 @@ import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer
 
 import { imageAttachments } from "./attach";
 import { lineChanges } from "./diff";
-import { folding } from "./fold";
+import { folding, rememberFolds } from "./fold";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { htmlPaste } from "./paste";
 import { CSS } from "./style";
@@ -334,12 +334,14 @@ export async function open(options: OpenOptions): Promise<Session> {
         livePreview,
         tables,
         folding,
+        rememberFolds("askw:folds:" + options.src),
         findMarks,
         imageSource.of(images),
         keymap.of([{ key: "Mod-s", run: () => { save(); return true; }, preventDefault: true }]),
         suggesters({
           notes: (q) => lookup("notes", { q }, "notes"),
           headings: (note) => lookup("headings", { note }, "headings"),
+          allHeadings: () => lookup("headings", { q: "", limit: "20000" }, "headings"),
           tags: () => lookup("tags", {}, "tags"),
         }),
         typing,

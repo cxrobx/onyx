@@ -716,6 +716,10 @@ class VaultApiTests(unittest.TestCase):
             [{"level": 1, "text": "Beta"}, {"level": 2, "text": "Plan"}, {"level": 3, "text": "Steps"}],
         )
         self.assertEqual(headings("Nowhere").json()["headings"], [])
+        # `[[##`: headings across the vault that hold what's typed, each with its note's link; code isn't searched.
+        across = self.client.get("/api/source/headings", params={"edit": edit, "q": "pla"}).json()["headings"]
+        self.assertEqual(across, [{"level": 2, "text": "Plan", "link": "Beta", "folder": ""}])
+        self.assertEqual(self.client.get("/api/source/headings", params={"edit": edit, "q": "not a"}).json()["headings"], [])
         self.assertEqual(headings("Beta", "forged").status_code, 403)
 
     def test_a_note_edited_through_a_linked_folder_saves_to_its_real_file_and_follows_its_links(self) -> None:

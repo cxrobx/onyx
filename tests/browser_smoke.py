@@ -3391,6 +3391,7 @@ class BrowserSmokeTests(unittest.TestCase):
             ("See |", ["type:[[road", "Enter"], "See [[Roadmap]]|"),
             ("See |", ["type:[[read", "Tab", "type: next"], "See [[Reading List]] next|"),
             ("See |", ["type:[[Roadmap#mil", "Enter"], "See [[Roadmap#Milestones]]|"),
+            ("See |", ["type:[[##miles", "Enter"], "See [[Roadmap#Milestones]]|"),  # headings across the vault
             ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
             ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
             ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
@@ -3695,6 +3696,27 @@ class BrowserSmokeTests(unittest.TestCase):
                     reader.evaluate("() => { const t = askwEditor.text(), i = t.indexOf('blurry'); askwEditor.reveal({from: i, to: i + 6}); }")
                     expect(frame.locator(".cm-line", has_text="Meet too blurry")).to_have_count(1)
                     self.assertEqual(note.read_text(encoding="utf-8").count("Meet too blurry"), 1)  # folding never edits
+
+                    # Folds are kept for the next ⌘E of the note, as Obsidian keeps them; one opened stays open.
+                    spot = arrow_of("Problems")
+                    page.mouse.click(spot["x"], spot["y"])
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(0)
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed")).to_have_count(0)
+                    frame.locator("main h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    expect(frame.locator(".askw-ed-folded")).to_have_count(1)
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(0)
+                    frame.locator(".askw-ed-folded").click()
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(1)
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed")).to_have_count(0)
+                    frame.locator("main h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(1)
+                    expect(frame.locator(".askw-ed-folded")).to_have_count(0)
                     browser.close()
         self.assertEqual(page_errors, [])
 
