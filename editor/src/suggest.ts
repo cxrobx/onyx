@@ -9,6 +9,8 @@ import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
 import { EditorState, Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
+import { slashSource } from "./commands";
+
 export interface NoteName { name: string; folder: string; link: string }
 export interface Heading { level: number; text: string }
 export interface TagCount { tag: string; count: number }
@@ -115,7 +117,7 @@ export function suggesters(lookups: Lookups): Extension {
   }
 
   return [
-    autocompletion({ override: [headingsSource, notesSource, tagsSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0 }),
+    autocompletion({ override: [headingsSource, notesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
     Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
   ];
 }

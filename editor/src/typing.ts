@@ -91,11 +91,11 @@ const deletePair: StateCommand = ({ state, dispatch }) => {
 };
 
 // The quote marks and list marker a line starts with, if any.
-const LEAD = /^(\s*(?:>\s?)*)(?:([-*+]|\d+[.)])([ \t]+)(?:\[(.)\][ \t]?)?)?/;
+export const LEAD = /^(\s*(?:>\s?)*)(?:([-*+]|\d+[.)])([ \t]+)(?:\[(.)\][ \t]?)?)?/;
 
 // ⌘L, Obsidian's "Toggle checkbox status", on every line the selection touches: a task is ticked or unticked, a list
 // item becomes a task, and any other line a task item.
-const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
+export const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
   const changes: { from: number; to?: number; insert: string }[] = [], seen = new Set<number>();
   for (const range of state.selection.ranges) {
     for (let n = state.doc.lineAt(range.from).number; n <= state.doc.lineAt(range.to).number; n++) {
@@ -120,7 +120,7 @@ const toggleCheckbox: StateCommand = ({ state, dispatch }) => {
 
 // ⌘K, Obsidian's "Insert Markdown link": `[selection]()` with the cursor in the parentheses, or `[]()` with it in the
 // brackets.
-const insertLink: StateCommand = ({ state, dispatch }) => {
+export const insertLink: StateCommand = ({ state, dispatch }) => {
   dispatch(state.update(state.changeByRange((range) => {
     const label = state.sliceDoc(range.from, range.to);
     return {
@@ -132,7 +132,7 @@ const insertLink: StateCommand = ({ state, dispatch }) => {
 };
 
 // ⌘/, Obsidian's "Toggle comment": `%%…%%` around the selection, or around the line's text when nothing is selected.
-const toggleComment: StateCommand = (target) => {
+export const toggleComment: StateCommand = (target) => {
   const { state, dispatch } = target;
   if (state.selection.ranges.some((r) => !r.empty)) return toggleWrap("%%")(target);
   dispatch(state.update(state.changeByRange((range) => {

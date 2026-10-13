@@ -3393,6 +3393,11 @@ class BrowserSmokeTests(unittest.TestCase):
             ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
             ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
             ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
+            # Slash commands: `/` and a command's name, Enter runs it in place of what was typed; Space leaves the `/`.
+            ("Title\n|", ["type:/heading2", "Enter", "type:Sub"], "Title\n## Sub|"),
+            ("|", ["type:/checkl", "Enter", "type:x"], "- [ ] x|"),
+            ("|", ["type:/table", "Enter", "type:A"], "| A| |  |\n| --- | --- |\n|  |  |"),  # `| A |  |`, the cursor after A
+            ("|", ["type:/ x"], "/ x|"),
             # Pasted HTML comes in as Markdown; HTML with nothing to keep, or pasted into code, as its plain text.
             ("|", ["html:<p>Read <a href='https://x.com/a'>the docs</a>, <strong>now</strong>.</p><ul><li>one<ul><li>deep</li></ul></li></ul>"
                    "\0Read the docs, now."], "Read [the docs](https://x.com/a), **now**.\n\n- one\n\t- deep|"),
@@ -3440,7 +3445,7 @@ class BrowserSmokeTests(unittest.TestCase):
                                   document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
                                 }""", [html, plain])
                             else:
-                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys)):
+                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
                                 page.keyboard.press(key)
                         if after.endswith("|]]") and "[[" in after:
