@@ -1494,6 +1494,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
     /// View ▸ Page Only (⌘B): the page alone in the window, and back. ⌘B typed in the page or the shell is taken there
     /// first (vault_ui.py), and in the editor it stays bold; this serves a click.
     @objc private func togglePageOnly() { onShell("onyxShell.togglePageOnly()") }
+    /// Edit ▸ Paste as Plain Text (⌘⇧V, Obsidian's key): in the ⌘E editor the clipboard's text goes in as it is, where
+    /// ⌘V converts a copy's formatting to Markdown (editor/src/paste.ts). Anywhere else, the Mac's own plain paste.
+    @objc private func pastePlain() {
+        let fallback = { NSApp.sendAction(#selector(NSTextView.pasteAsPlainText(_:)), to: nil, from: nil) }
+        guard let webView, let text = NSPasteboard.general.string(forType: .string),
+              ["/", "/vault"].contains(webView.url?.path ?? "") else { _ = fallback(); return }
+        webView.evaluateJavaScript("!!(window.onyxShell && onyxShell.pastePlain && onyxShell.pastePlain(\(jsString(text))))") { result, _ in
+            if (result as? Bool) != true { _ = fallback() }
+        }
+    }
     @objc private func openFind() { findInPage("open") }
     @objc private func findNext() { findInPage("next") }
     @objc private func findPrevious() { findInPage("previous") }
@@ -1661,6 +1671,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         editMenu.addItem(NSMenuItem(title: "Cut", action: #selector(NSText.cut(_:)), keyEquivalent: "x"))
         editMenu.addItem(NSMenuItem(title: "Copy", action: #selector(NSText.copy(_:)), keyEquivalent: "c"))
         editMenu.addItem(NSMenuItem(title: "Paste", action: #selector(NSText.paste(_:)), keyEquivalent: "v"))
+        editMenu.addItem(menuItem("Paste as Plain Text", #selector(pastePlain), "V"))
         editMenu.addItem(NSMenuItem(title: "Select All", action: #selector(NSText.selectAll(_:)), keyEquivalent: "a"))
         editMenu.addItem(.separator())
         // Find, where every Mac app files it: the reader's find bar (find_ui.py).

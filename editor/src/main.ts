@@ -15,6 +15,7 @@ import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer
 
 import { lineChanges } from "./diff";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
+import { htmlPaste } from "./paste";
 import { CSS } from "./style";
 import { suggesters } from "./suggest";
 import { typing } from "./typing";
@@ -107,6 +108,8 @@ export interface EditorFace {
   selection(): { from: number; to: number };
   select(range: { from: number; to: number }): void;
   onChange(listener: (() => void) | null): void;
+  /** Edit ▸ Paste as Plain Text in the app: the clipboard's text, put in as it is (paste.ts converts a plain paste's HTML). */
+  insertPlain(text: string): void;
 }
 // A heading as the outline uses an element: where it is on screen, and a way there. CodeMirror draws only the lines
 // near the window, so the heading's line may have no element at all; its place comes from the editor's own measure.
@@ -322,6 +325,7 @@ export async function open(options: OpenOptions): Promise<Session> {
           tags: () => lookup("tags", {}, "tags"),
         }),
         typing,
+        htmlPaste,
         keymap.of(historyKeymap),
         EditorView.contentAttributes.of({ spellcheck: "true", autocorrect: "on", autocapitalize: "sentences" }),
         EditorView.updateListener.of((u) => {
@@ -455,6 +459,10 @@ export async function open(options: OpenOptions): Promise<Session> {
     selection: () => ({ from: view.state.selection.main.from, to: view.state.selection.main.to }),
     select(range) { view.dispatch({ selection: { anchor: range.from, head: range.to } }); view.focus(); },
     onChange(listener) { changeListener = listener; },
+    insertPlain(text) {
+      view.dispatch(view.state.replaceSelection(text.replace(/\r\n?/g, "\n")), { userEvent: "input.paste", scrollIntoView: true });
+      view.focus();
+    },
   };
   function anchorAt(pos: number): HeadingAnchor {
     return {

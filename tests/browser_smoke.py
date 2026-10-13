@@ -3393,6 +3393,14 @@ class BrowserSmokeTests(unittest.TestCase):
             ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
             ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
             ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
+            # Pasted HTML comes in as Markdown; HTML with nothing to keep, or pasted into code, as its plain text.
+            ("|", ["html:<p>Read <a href='https://x.com/a'>the docs</a>, <strong>now</strong>.</p><ul><li>one<ul><li>deep</li></ul></li></ul>"
+                   "\0Read the docs, now."], "Read [the docs](https://x.com/a), **now**.\n\n- one\n\t- deep|"),
+            ("|", ["html:<table><tr><td>Name</td><td>Qty</td></tr><tr><td>Apples</td><td>3</td></tr></table>\0Name\tQty"],
+             "| Name | Qty |\n| --- | --- |\n| Apples | 3 ||"),
+            ("|", ["html:<div style='white-space: pre;'><div><span>a = 1</span></div><div><span>a++</span></div></div>\0a = 1\na++"], "a = 1\na++|"),
+            ("```\n|\n```", ["html:<b>x</b>\0x"], "```\nx|\n```"),
+            ("|", ["html:<p>hi<img src=x onerror='window.top.__pwned=1'><script>window.top.__pwned=1</script></p>\0hi"], "hi![](x)|"),
         ]
         shown = """() => { const t = askwEditor.text(), s = askwEditor.selection();
           return s.from === s.to ? t.slice(0, s.from) + '|' + t.slice(s.from)
@@ -3423,6 +3431,14 @@ class BrowserSmokeTests(unittest.TestCase):
                         for key in keys:
                             if key.startswith("type:"):
                                 page.keyboard.type(key[5:])
+                            elif key.startswith("html:"):
+                                html, _, plain = key[5:].partition("\0")
+                                reader.evaluate("""([html, plain]) => {
+                                  const data = new DataTransfer();
+                                  data.setData('text/html', html);
+                                  data.setData('text/plain', plain);
+                                  document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
+                                }""", [html, plain])
                             else:
                                 if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys)):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
@@ -3436,6 +3452,11 @@ class BrowserSmokeTests(unittest.TestCase):
                             page.wait_for_timeout(300)
                             expect(frame.locator(".cm-tooltip-autocomplete")).to_have_count(0)
                         self.assertEqual(reader.evaluate(shown), after, (engine, before, keys))
+                    self.assertIsNone(page.evaluate("window.__pwned"))  # pasted HTML is parsed inert: nothing in it runs
+                    # Edit ▸ Paste as Plain Text in the app (⌘⇧V) hands the clipboard's text to the editor as it is.
+                    reader.evaluate("() => { const v = document.querySelector('.cm-content').cmTile.root.view; v.dispatch({changes: {from: 0, to: v.state.doc.length, insert: 'x '}, selection: {anchor: 2}}); }")
+                    self.assertTrue(page.evaluate("onyxShell.pastePlain('<b>raw</b> **kept**')"))
+                    self.assertEqual(reader.evaluate(shown), "x <b>raw</b> **kept**|")
                     browser.close()
         self.assertEqual(page_errors, [])
 

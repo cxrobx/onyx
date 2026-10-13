@@ -1015,7 +1015,7 @@ const h=native&&window.webkit.messageHandlers.askwChrome;if(h)Promise.resolve(h.
 requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.remove('page-still')));return true}}
 function pageOnlyKey(e){{if(e.defaultPrevented||!(e.metaKey||e.ctrlKey)||e.altKey||e.shiftKey||(e.key||'').toLowerCase()!=='b'||(e.target&&e.target.isContentEditable))return;e.preventDefault();setPageOnly(!pageOnly())}}
 document.addEventListener('keydown',pageOnlyKey);onReaderLoad(()=>{{try{{reader.contentWindow.addEventListener('keydown',pageOnlyKey)}}catch(e){{}}}});
-window.onyxShell={{pageOnly:()=>pageOnly(),togglePageOnly:()=>setPageOnly(!pageOnly()),openSettings:section=>PANELS.openSettings(section),openHistory:()=>PANELS.openHistory(),openSearch:()=>SEARCH.open(),find:verb=>FIND.run(verb),edit:()=>readerEdit(),...TAB_SHELL}};
+window.onyxShell={{pageOnly:()=>pageOnly(),togglePageOnly:()=>setPageOnly(!pageOnly()),openSettings:section=>PANELS.openSettings(section),openHistory:()=>PANELS.openHistory(),openSearch:()=>SEARCH.open(),find:verb=>FIND.run(verb),edit:()=>readerEdit(),pastePlain:text=>{{try{{const e=editorOf(reader.contentDocument);if(e){{e.insertPlain(text);return true}}}}catch(e){{}}return false}},...TAB_SHELL}};
 // Put back as it was left without a slide: the page opens with the sidebar already away.
 if(/^(unpinned|collapsed)$/.test(recall(SIDE_KEY)||'')){{document.body.classList.add('side-still');setPinned(false);requestAnimationFrame(()=>requestAnimationFrame(()=>document.body.classList.remove('side-still')))}}
 // The outline likewise: docked at once if it was pinned, else away until its toggle is hovered.
