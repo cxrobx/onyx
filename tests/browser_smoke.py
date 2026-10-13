@@ -3489,15 +3489,15 @@ class BrowserSmokeTests(unittest.TestCase):
                     frame = page.frame_locator("iframe[name=reader]")
                     reader = page.frame(name="reader")
                     frame.locator("main h1").click()
+                    # A themed note, as a vault's look paints one: a solid ground and its own ink.
+                    reader.evaluate("""() => { document.body.style.background = 'rgb(253, 246, 227)';
+                      document.querySelector('main').style.background = 'transparent';
+                      document.querySelector('main').style.color = 'rgb(0, 43, 54)'; }""")
                     page.keyboard.press("Meta+e")
                     expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
                     bar = frame.locator(".askw-ed-toolbar")
                     expect(bar).to_be_hidden()
 
-                    # A themed note, as a vault's look paints one: a solid ground and its own ink.
-                    reader.evaluate("""() => { document.body.style.background = 'rgb(253, 246, 227)';
-                      document.querySelector('main').style.background = 'transparent';
-                      document.querySelector('main').style.color = 'rgb(0, 43, 54)'; }""")
                     # Drag across "words": the bar above the selection, the ask button below it.
                     line = frame.locator(".cm-line", has_text="Some words")
                     word = reader.evaluate("""() => {
@@ -3523,6 +3523,11 @@ class BrowserSmokeTests(unittest.TestCase):
                     for chrome in (bar, trigger):
                         self.assertEqual(chrome.evaluate("e => getComputedStyle(e).backgroundColor"), page_bg)
                         self.assertEqual(chrome.evaluate("e => getComputedStyle(e).color"), page_ink)
+                    # The selection, the cursor and the status pill too.
+                    self.assertEqual(frame.locator(".cm-selectionBackground").first.evaluate("e => getComputedStyle(e).backgroundColor"),
+                                     "rgba(0, 43, 54, 0.17)")
+                    self.assertEqual(frame.locator(".askw-ed-status").evaluate("e => getComputedStyle(e).backgroundColor"),
+                                     "rgba(253, 246, 227, 0.9)")
                     if shots:
                         page.screenshot(path=f"{shots}/toolbar-{engine}.png")
 
@@ -3552,6 +3557,63 @@ class BrowserSmokeTests(unittest.TestCase):
                     frame.locator(".cm-line", has_text="A second line").click(button="right", position={"x": 20, "y": 8})
                     expect(bar).to_be_hidden()
                     expect(frame.locator(".askw-menu")).to_be_visible()
+                    browser.close()
+        self.assertEqual(page_errors, [])
+
+    def test_headings_and_list_items_fold_while_editing(self) -> None:
+        # Obsidian's "Fold heading" and "Fold indent": an arrow in the margin folds a heading's section (to the next
+        # heading as high) or a list item's children, and the line ends in "…", which opens it again. A find that lands
+        # inside a fold opens it. Code blocks and quotes don't fold. Both engines.
+        note = self.root / "folding.md"
+        note.write_text(
+            "# Meeting\n\n## Problems\n\n- Video quality\n\t- Meet too blurry\n- Swatches\n\n## Next Steps\n\n1. Call.\n\n"
+            "```\n# not a heading\n```\n\n> a quote\n",
+            encoding="utf-8",
+        )
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    reader = page.frame(name="reader")
+                    frame.locator("main h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    # One arrow per heading and per list item with children; none for the code block or the quote.
+                    arrows = reader.evaluate("""() => [...document.querySelectorAll('.cm-foldGutter .cm-gutterElement')]
+                      .filter(g => g.querySelector('.askw-ed-fold') && g.getBoundingClientRect().height > 0).map(g => {
+                        const r = g.getBoundingClientRect(), y = r.top + r.height / 2;
+                        const line = [...document.querySelectorAll('.cm-line')].find(l => { const b = l.getBoundingClientRect(); return b.top <= y && b.bottom >= y; });
+                        return line ? line.textContent.replace(/^#+ /, '') : '';  // the cursor's line shows its `#`
+                      })""")
+                    self.assertEqual(arrows, ["Meeting", "Problems", "• Video quality", "Next Steps"])
+
+                    def arrow_of(text: str) -> dict:
+                        return reader.evaluate("""text => {
+                          const l = [...document.querySelectorAll('.cm-line')].find(l => l.textContent === text), r = l.getBoundingClientRect();
+                          const g = document.querySelector('.cm-foldGutter').getBoundingClientRect(), f = frameElement.getBoundingClientRect();
+                          return {x: f.left + g.left + g.width / 2, y: f.top + r.top + r.height / 2};
+                        }""", text)
+
+                    spot = arrow_of("Problems")
+                    page.mouse.click(spot["x"], spot["y"])
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(0)
+                    expect(frame.locator(".cm-line", has_text="Next Steps")).to_have_count(1)
+                    expect(frame.locator(".askw-ed-folded")).to_have_count(1)
+                    frame.locator(".askw-ed-folded").click()
+                    expect(frame.locator(".cm-line", has_text="Video quality")).to_have_count(1)
+
+                    # A list item folds its children only; a find inside the fold opens it.
+                    page.mouse.click(*arrow_of("• Video quality").values())
+                    expect(frame.locator(".cm-line", has_text="Meet too blurry")).to_have_count(0)
+                    expect(frame.locator(".cm-line", has_text="Swatches")).to_have_count(1)
+                    reader.evaluate("() => { const t = askwEditor.text(), i = t.indexOf('blurry'); askwEditor.reveal({from: i, to: i + 6}); }")
+                    expect(frame.locator(".cm-line", has_text="Meet too blurry")).to_have_count(1)
+                    self.assertEqual(note.read_text(encoding="utf-8").count("Meet too blurry"), 1)  # folding never edits
                     browser.close()
         self.assertEqual(page_errors, [])
 

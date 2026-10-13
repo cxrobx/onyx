@@ -27,9 +27,16 @@ body .askw-ed .cm-editor.cm-focused{outline:none}
 body .askw-ed .cm-scroller{font-family:inherit;line-height:inherit;overflow:visible}
 body .askw-ed .cm-content{padding:0;caret-color:rgb(var(--reader-accent))}
 body .askw-ed .cm-line{padding:0}
-body .askw-ed .cm-cursor,body .askw-ed .cm-dropCursor{border-left:2px solid rgb(var(--reader-accent))}
-body .askw-ed .cm-editor > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:rgb(var(--reader-accent)/.14)}
-body .askw-ed .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:rgb(var(--reader-accent)/.26)}
+body .askw-ed .cm-gutters{position:absolute;top:0;left:-30px;height:100%;border:0;background:transparent;color:rgb(var(--reader-faint))}
+body .askw-ed .cm-foldGutter .cm-gutterElement{display:flex;justify-content:center;align-items:flex-end;width:22px;cursor:pointer}
+body .askw-ed .askw-ed-fold{display:flex;height:1.65em;align-items:center;opacity:0;transition:opacity .12s;transform:rotate(90deg)}
+body .askw-ed .cm-editor:hover .askw-ed-fold{opacity:.5}
+body .askw-ed .cm-editor .askw-ed-fold:hover{opacity:1}
+body .askw-ed .askw-ed-fold.is-folded{opacity:.8;transform:none}
+body .askw-ed .askw-ed-folded{display:inline-block;margin-left:6px;padding:0 6px;border-radius:5px;background:rgb(var(--reader-line)/.07);color:rgb(var(--reader-faint));font-size:.85em;line-height:1.4;cursor:pointer}
+body .askw-ed .cm-cursor,body .askw-ed .cm-dropCursor{border-left:2px solid var(--askw-note-caret,rgb(var(--reader-accent)))}
+body .askw-ed .cm-editor > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:var(--askw-note-sel-blur,rgb(var(--reader-accent)/.14))}
+body .askw-ed .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:var(--askw-note-sel,rgb(var(--reader-accent)/.26))}
 body .askw-ed .cm-line.askw-ed-h{font-weight:700;line-height:1.2;letter-spacing:-.02em}
 body .askw-ed .cm-line.askw-ed-h1{font-size:2.35rem;padding-top:.3em}
 body .askw-ed .cm-line.askw-ed-h2{font-size:1.5em;padding-top:.5em}
@@ -104,5 +111,6 @@ body .askw-ed .cm-tooltip-autocomplete .cm-completionDetail{margin-left:auto;fon
 .askw-ed-conflict button{padding:5px 10px;border:1px solid rgb(var(--reader-line)/.16);border-radius:7px;background:rgb(var(--reader-code));color:inherit;font:inherit;font-size:13px;cursor:pointer}
 .askw-ed-conflict button:first-of-type{background:rgb(var(--reader-accent));border-color:transparent;color:#fff}
 .askw-ed-status{position:fixed;left:12px;bottom:12px;z-index:2147483599;padding:4px 10px;border:1px solid rgb(var(--reader-line)/.1);border-radius:999px;background:rgb(var(--reader-pane)/.86);color:rgb(var(--reader-muted));font:500 11.5px/1.4 -apple-system,BlinkMacSystemFont,sans-serif;backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:none}
+.askw-ed-status.is-toned{border-color:rgb(var(--askw-note-ink)/.14);background:rgb(var(--askw-note-bg)/.9);color:rgb(var(--askw-note-ink)/.72)}
 .askw-ed-status[data-state=problem]{color:#c2410c}
 `;

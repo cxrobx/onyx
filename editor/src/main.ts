@@ -6,7 +6,7 @@
 // the server refuses one whose file changed on disk meanwhile (another editor, an agent, a sync), and the editor asks
 // which to keep instead of overwriting either.
 import { history, historyKeymap } from "@codemirror/commands";
-import { ensureSyntaxTree, Language, LanguageSupport, syntaxTree } from "@codemirror/language";
+import { ensureSyntaxTree, foldedRanges, foldNodeProp, Language, LanguageSupport, syntaxTree, unfoldEffect } from "@codemirror/language";
 import { commonmarkLanguage, markdownKeymap } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
@@ -14,6 +14,7 @@ import { Decoration, DecorationSet, EditorView, keymap } from "@codemirror/view"
 import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer/markdown";
 
 import { lineChanges } from "./diff";
+import { folding } from "./fold";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { htmlPaste } from "./paste";
 import { CSS } from "./style";
@@ -54,8 +55,11 @@ export interface Session {
 // the bare one from @lezer/markdown: that one tags its Document node with the language's data, which is what the
 // Markdown keymap checks before it acts, so Enter continues a list or quote and Backspace lifts its marker. Built from
 // the bare parser, the tag is missing and both silently do nothing.
+// Folding is Obsidian's (fold.ts): headings and list items. The parser's own folds (code blocks, quotes) are turned off,
+// since Obsidian has none there.
+const NO_SYNTAX_FOLDS = { props: [foldNodeProp.add(() => () => null)] };
 const markdownSupport = new LanguageSupport(
-  new Language(commonmarkLanguage.data, (commonmarkLanguage.parser as MarkdownParser).configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags]), [], "markdown"),
+  new Language(commonmarkLanguage.data, (commonmarkLanguage.parser as MarkdownParser).configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags, NO_SYNTAX_FOLDS]), [], "markdown"),
   [Prec.high(keymap.of(markdownKeymap))],
 );
 
@@ -202,6 +206,17 @@ export async function open(options: OpenOptions): Promise<Session> {
   bar.hidden = true;
   host.append(bar);
   document.body.append(status);
+  // The selection, the cursor and the status pill in the note's own colours (read off its page by ask.js, as the
+  // formatting bar and the ask button are), where its page has them; otherwise the reader's accent.
+  const tone = window.askwNoteColours?.() ?? null;
+  if (tone) {
+    host.style.setProperty("--askw-note-sel", `rgb(${tone.ink} / .17)`);
+    host.style.setProperty("--askw-note-sel-blur", `rgb(${tone.ink} / .1)`);
+    host.style.setProperty("--askw-note-caret", `rgb(${tone.ink})`);
+    status.style.setProperty("--askw-note-bg", tone.bg);
+    status.style.setProperty("--askw-note-ink", tone.ink);
+    status.classList.add("is-toned");
+  }
 
   const dirty = () => mustWrite || view.state.doc.toString() !== saved;
   function keepDraft() {
@@ -317,6 +332,7 @@ export async function open(options: OpenOptions): Promise<Session> {
         yamlFrontmatter({ content: markdownSupport }),
         livePreview,
         tables,
+        folding,
         findMarks,
         imageSource.of(images),
         keymap.of([{ key: "Mod-s", run: () => { save(); return true; }, preventDefault: true }]),
@@ -452,6 +468,7 @@ export async function open(options: OpenOptions): Promise<Session> {
     },
     mark(ranges, current) { view.dispatch({ effects: setFind.of({ ranges, current }) }); },
     reveal(range) {
+      unfoldAround(range.from, range.to);
       const block = view.lineBlockAt(range.from), top = block.top + view.documentTop;
       if (top < 56 || top + block.height > window.innerHeight - 24) {
         view.dispatch({ effects: EditorView.scrollIntoView(range.from, { y: "center" }) });
@@ -466,13 +483,22 @@ export async function open(options: OpenOptions): Promise<Session> {
       view.focus();
     },
   };
+  // A find or an outline jump into a folded section opens the fold first, or there is nothing there to see.
+  function unfoldAround(from: number, to: number) {
+    const effects: StateEffect<{ from: number; to: number }>[] = [];
+    foldedRanges(view.state).between(from, to, (a, b) => { if (a <= to && b >= from) effects.push(unfoldEffect.of({ from: a, to: b })); });
+    if (effects.length) view.dispatch({ effects });
+  }
   function anchorAt(pos: number): HeadingAnchor {
     return {
       getBoundingClientRect() {
         const block = view.lineBlockAt(Math.min(pos, view.state.doc.length)), top = block.top + view.documentTop;
         return { top, bottom: top + block.height, left: 0, right: 1, width: 1, height: block.height };
       },
-      scrollIntoView() { view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 16 }) }); },
+      scrollIntoView() {
+        unfoldAround(pos, pos);
+        view.dispatch({ effects: EditorView.scrollIntoView(pos, { y: "start", yMargin: 16 }) });
+      },
       closest: () => null,
     };
   }
