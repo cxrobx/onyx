@@ -11,7 +11,7 @@ import { commonmarkLanguage, markdownKeymap } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
 import { EditorSelection, EditorState, Prec, StateCommand, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, keymap } from "@codemirror/view";
-import { Autolink, parser as commonmark, Strikethrough, Table, TaskList } from "@lezer/markdown";
+import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer/markdown";
 
 import { lineChanges } from "./diff";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
@@ -46,10 +46,12 @@ export interface Session {
 
 // CommonMark with tables, strikethrough, highlights, tasks, bare URLs, `%%comments%%` and `#tags`, as the reader renders (viewer.py), plus wikilinks. The Language is built here rather than
 // through `markdown()` so the HTML and JavaScript grammars that bundles for inline HTML stay out of this file: the
-// reader escapes raw HTML, so there is nothing for them to highlight. It shares `commonmarkLanguage`'s data, which is
-// what the Markdown keymap checks, so Enter still continues a list and Backspace still lifts one.
+// reader escapes raw HTML, so there is nothing for them to highlight. It extends `commonmarkLanguage`'s own parser, not
+// the bare one from @lezer/markdown: that one tags its Document node with the language's data, which is what the
+// Markdown keymap checks before it acts, so Enter continues a list or quote and Backspace lifts its marker. Built from
+// the bare parser, the tag is missing and both silently do nothing.
 const markdownSupport = new LanguageSupport(
-  new Language(commonmarkLanguage.data, commonmark.configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags]), [], "markdown"),
+  new Language(commonmarkLanguage.data, (commonmarkLanguage.parser as MarkdownParser).configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags]), [], "markdown"),
   [Prec.high(keymap.of(markdownKeymap))],
 );
 

@@ -3299,6 +3299,19 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(status).to_have_text("Editing · Saved", timeout=5000)
                     self.assertIn("Edited again Target paragraph", note.read_text(encoding="utf-8"))
 
+                    # Enter continues a list, as in Obsidian, and Enter on the empty item it made takes its marker away.
+                    reader.evaluate("scrollTo(0, 0)")
+                    frame.locator(".cm-line", has_text=re.compile(r"^\W*two$")).click()
+                    page.keyboard.press("End")
+                    page.keyboard.press("Enter")
+                    page.keyboard.type("three")
+                    page.keyboard.press("Enter")
+                    page.keyboard.press("Enter")
+                    page.keyboard.type("After the list.")
+                    expect(status).to_have_text("Editing · Saved", timeout=5000)
+                    self.assertIn("\n- one\n- two\n- three\nAfter the list.\n", note.read_text(encoding="utf-8"))
+                    reader.evaluate("y => scrollTo(0, y)", reading_at)
+
                     # ⌘E again: the page, re-rendered from the file, with the edited paragraph where the editor had it.
                     reader.evaluate("""() => {
                       [...document.querySelectorAll('.askw-ed .cm-line')].find(l => l.textContent.includes('Target')).scrollIntoView();
