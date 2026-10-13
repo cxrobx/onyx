@@ -21,6 +21,8 @@ widget's stream reader can parse and display it.
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import html as html_lib
 import json
 import logging
@@ -969,6 +971,47 @@ def create_app(config: AppConfig) -> FastAPI:
         except viewer.ViewerError as exc:
             return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
         return {"ok": True, "sig": sig}
+
+    @app.post("/api/source/attachment")
+    async def add_attachment(request: Request):
+        """An image pasted or dropped into the editor, written as a new file where Obsidian would put it: the vault's
+        attachment folder, or beside a note that's in no vault. It never replaces a file (a taken name gets a number),
+        takes only whole PNG, JPEG, GIF or WebP images, and goes nowhere a save of the note itself couldn't reach. The
+        editor puts the link to it in the note; ``embed`` is that link."""
+        if denied := api_forbidden(request):
+            return denied
+        try:
+            body = await request.json()
+        except Exception:
+            return JSONResponse({"ok": False, "error": "invalid JSON"}, status_code=400)
+        if body.get("token") != config.token:
+            return JSONResponse({"ok": False, "error": "invalid token"}, status_code=403)
+        opened = editing(str(body.get("edit") or ""))
+        if not opened:
+            return JSONResponse({"ok": False, "error": "Reload this page to add images to it."}, status_code=403)
+        try:
+            data = base64.b64decode(str(body.get("data") or ""), validate=True)
+        except (ValueError, binascii.Error):
+            return JSONResponse({"ok": False, "error": "That image couldn't be read."}, status_code=400)
+
+        def write() -> dict:
+            notes = opened.get("notes")
+            if notes:
+                root = Path(notes)
+                index = app.state.vault.get(root)
+                path = vault.save_attachment(root / index.attachment_folder, str(body.get("name") or ""), data, inside=root)
+                app.state.vault.invalidate()
+                return {"embed": f"![[{path.name}]]", "name": path.name}
+            # A note in no vault: beside it, linked by its relative path, as the reader resolves a Markdown image.
+            folder = Path(os.path.realpath(opened["source"])).parent
+            path = vault.save_attachment(folder, str(body.get("name") or ""), data, inside=folder)
+            return {"embed": f"![]({urllib.parse.quote(path.name)})", "name": path.name}
+
+        try:
+            saved = await asyncio.to_thread(write)
+        except ValueError as exc:
+            return JSONResponse({"ok": False, "error": str(exc)}, status_code=400)
+        return {"ok": True, **saved}
 
     @app.post("/api/source/images")
     async def note_images(request: Request):

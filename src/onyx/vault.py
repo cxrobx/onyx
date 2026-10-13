@@ -1171,6 +1171,72 @@ class VaultIndex:
         return results[:limit], len(results) > limit
 
 
+# MARK: - Attachments, for an image pasted or dropped into the editor
+
+# The image types an attachment may be, each by what its first bytes must be: the name and the browser's say-so aren't
+# taken on trust. (No SVG: it can carry script, and nothing here needs it.)
+ATTACHMENT_TYPES = {
+    "png": (b"\x89PNG\r\n\x1a\n",),
+    "jpg": (b"\xff\xd8\xff",),
+    "jpeg": (b"\xff\xd8\xff",),
+    "gif": (b"GIF87a", b"GIF89a"),
+    "webp": (b"RIFF",),
+}
+MAX_ATTACHMENT_BYTES = 25 * 1024 * 1024
+
+
+def _attachment_name(name: str) -> tuple[str, str]:
+    """A file name an attachment may take, as (stem, ext): the last path part, without what a file name can't hold."""
+    base = re.sub(r"[\x00-\x1f/\\:*?\"<>|#^\[\]]+", " ", os.path.basename(str(name).replace("\\", "/"))).strip(" .")
+    stem, dot, ext = base.rpartition(".")
+    if not dot:
+        stem, ext = base, ""
+    return re.sub(r"\s+", " ", stem).strip()[:120] or "Pasted image", ext.lower()
+
+
+def save_attachment(folder: Path, name: str, data: bytes, *, inside: Path) -> Path:
+    """Write ``data`` as a new image file in ``folder``, which must lie within ``inside`` (a vault, or the note's own
+    folder) through no linked folder, and is made when it is missing. Never over an existing file: a name already
+    taken gets " 1", " 2" …, as Obsidian numbers them. Raises ValueError for anything that isn't a whole image of an
+    allowed type, or a place outside ``inside``."""
+    stem, ext = _attachment_name(name)
+    if ext not in ATTACHMENT_TYPES:
+        raise ValueError("Only PNG, JPEG, GIF and WebP images can be added.")
+    if not data or len(data) > MAX_ATTACHMENT_BYTES:
+        raise ValueError("That image is empty or larger than 25 MB.")
+    if not data.startswith(ATTACHMENT_TYPES[ext]) or (ext == "webp" and data[8:12] != b"WEBP"):
+        raise ValueError("That file isn't the image its name says it is.")
+    base, target = normalize(inside), normalize(folder)
+    if not is_inside(target, base):
+        raise ValueError("Attachments go inside the note's vault.")
+    # Each folder between the vault and the target: an own folder, never a linked one; made where it is missing.
+    current = base
+    for part in target.relative_to(base).parts:
+        if part in {".", ".."} or part.startswith("."):
+            raise ValueError("Attachments go inside the note's vault.")
+        current = current / part
+        if os.path.islink(current):
+            raise ValueError(f"“{part}” is a linked folder, so attachments can't go there.")
+        if not current.exists():
+            current.mkdir()
+        elif not current.is_dir():
+            raise ValueError(f"“{part}” isn't a folder.")
+    real_base, real_target = Path(os.path.realpath(base)), Path(os.path.realpath(current))
+    if not (real_target == real_base or real_target.is_relative_to(real_base)):
+        raise ValueError("Attachments go inside the note's vault.")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    for n in range(1000):
+        path = current / (f"{stem}.{ext}" if n == 0 else f"{stem} {n}.{ext}")
+        try:
+            fd = os.open(path, flags, 0o644)
+        except FileExistsError:
+            continue
+        with os.fdopen(fd, "wb") as out:
+            out.write(data)
+        return path
+    raise ValueError("Too many images share that name.")
+
+
 # MARK: - Tags and headings, for the editor's suggesters
 
 # `#tag` as Obsidian reads one: after a space, a bracket or the line's start, letters, digits, `_`, `-` and `/`, and

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import importlib.util
 import io
 import json
@@ -3557,6 +3558,86 @@ class BrowserSmokeTests(unittest.TestCase):
                     frame.locator(".cm-line", has_text="A second line").click(button="right", position={"x": 20, "y": 8})
                     expect(bar).to_be_hidden()
                     expect(frame.locator(".askw-menu")).to_be_visible()
+                    browser.close()
+        self.assertEqual(page_errors, [])
+
+    def test_a_pasted_or_dropped_image_becomes_an_attachment_in_the_vault(self) -> None:
+        # As in Obsidian: an image pasted into ⌘E's editor is saved as "Pasted image <date>.png" in the vault's attachment
+        # folder and linked where it was pasted; a dropped image file keeps its name and is linked where it fell. The
+        # editor draws each once the note is saved, and so does the page. Both engines.
+        notes = self.root / "AttachVault"
+        (notes / ".obsidian").mkdir(parents=True, exist_ok=True)
+        (notes / ".obsidian" / "app.json").write_text('{"attachmentFolderPath": "Files/Pictures"}', encoding="utf-8")
+        note = notes / "Pictures.md"
+        self.app.state.storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
+        self.app.state.vault.invalidate()
+        home = patch("pathlib.Path.home", return_value=self.root.resolve())  # /_fs serves only under home
+        home.start()
+        self.addCleanup(home.stop)
+        png = base64.b64encode(_png(40, 30)).decode()
+        put_file = """([b64, name, kind, x, y]) => {
+          const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0)), data = new DataTransfer();
+          data.items.add(new File([bytes], name, {type: 'image/png'}));
+          const target = document.querySelector('.cm-content');
+          if (kind === 'paste') target.dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
+          else {
+            target.dispatchEvent(new DragEvent('dragover', {dataTransfer: data, bubbles: true, cancelable: true, clientX: x, clientY: y}));
+            target.dispatchEvent(new DragEvent('drop', {dataTransfer: data, bubbles: true, cancelable: true, clientX: x, clientY: y}));
+          }
+        }"""
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    if (notes / "Files").exists():
+                        shutil.rmtree(notes / "Files")
+                    note.write_text("# Pictures\n\nFirst line.\n\nLast line.\n", encoding="utf-8")
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    reader = page.frame(name="reader")
+                    frame.locator("main h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    status = frame.locator(".askw-ed-status")
+
+                    # Pasted at the end of "First line.": a new file, linked there.
+                    reader.evaluate("() => { const t = askwEditor.text(), i = t.indexOf('First line.') + 11; askwEditor.select({from: i, to: i}); }")
+                    reader.evaluate(put_file, [png, "image.png", "paste", 0, 0])
+                    pasted = list((notes / "Files" / "Pictures").glob("Pasted image *.png")) if (notes / "Files" / "Pictures").exists() else []
+                    for _ in range(50):
+                        pasted = list((notes / "Files" / "Pictures").glob("Pasted image *.png")) if (notes / "Files" / "Pictures").exists() else []
+                        if pasted:
+                            break
+                        page.wait_for_timeout(100)
+                    self.assertEqual(len(pasted), 1)
+                    self.assertRegex(pasted[0].name, r"^Pasted image \d{14}\.png$")
+                    self.assertEqual(pasted[0].read_bytes(), _png(40, 30))
+                    expect(status).to_have_text("Editing · Saved", timeout=5000)
+                    self.assertIn(f"First line.![[{pasted[0].name}]]\n", note.read_text(encoding="utf-8"))
+
+                    # Dropped onto "Last line.": keeps its name, linked where it fell.
+                    spot = reader.evaluate("""() => { const l = [...document.querySelectorAll('.cm-line')].find(l => l.textContent === 'Last line.');
+                      const r = l.getBoundingClientRect(); return [r.right - 2, r.top + r.height / 2]; }""")
+                    reader.evaluate(put_file, [png, "Diagram.png", "drop", *spot])
+                    expect(status).to_have_text("Editing · Saved", timeout=5000)
+                    for _ in range(50):
+                        if "![[Diagram.png]]" in note.read_text(encoding="utf-8"):
+                            break
+                        page.wait_for_timeout(100)
+                    self.assertIn("Last line.![[Diagram.png]]", note.read_text(encoding="utf-8"))
+                    self.assertTrue((notes / "Files" / "Pictures" / "Diagram.png").is_file())
+
+                    # Drawn in the editor once saved (cursor away from them), and on the page after ⌘E.
+                    reader.evaluate("() => askwEditor.select({from: 0, to: 0})")
+                    expect(frame.locator(".askw-ed img.askw-ed-img")).to_have_count(2, timeout=5000)
+                    page.keyboard.press("Meta+e")
+                    pictures = frame.locator("main img")
+                    expect(pictures).to_have_count(2, timeout=5000)
+                    for i in range(2):
+                        self.assertGreater(pictures.nth(i).evaluate("i => i.complete ? i.naturalWidth : 0"), 0)
                     browser.close()
         self.assertEqual(page_errors, [])
 

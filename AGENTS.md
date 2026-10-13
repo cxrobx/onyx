@@ -89,6 +89,14 @@ missing, each now with a test:
 The editor's images come through `/_fs` under their own capability, which lists
 only images the note *as saved* references, so `/_fs` still serves only files a
 document referenced.
+An image pasted or dropped into the editor (`POST /api/source/attachment`) is the
+one other write on this path, and it only ever *creates*: a new PNG, JPEG, GIF or
+WebP file (checked by its bytes, ≤25 MB), in the vault's attachment folder or
+beside a note that's in no vault, through no linked folder and never over an
+existing file (a taken name gets a number). Same token and edit capability as a
+save.
+→ `test_a_pasted_image_is_a_new_file_in_the_vaults_attachment_folder_and_nowhere_else`,
+`test_a_pasted_or_dropped_image_becomes_an_attachment_in_the_vault`
 → `test_editing_saves_only_the_note_its_page_opened_and_never_over_a_newer_version`,
 `test_two_saves_against_one_version_never_both_land`,
 `test_a_note_is_saved_only_where_its_page_found_it`,

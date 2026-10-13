@@ -13,6 +13,7 @@ import { EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, keymap } from "@codemirror/view";
 import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer/markdown";
 
+import { imageAttachments } from "./attach";
 import { lineChanges } from "./diff";
 import { folding } from "./fold";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
@@ -342,6 +343,14 @@ export async function open(options: OpenOptions): Promise<Session> {
           tags: () => lookup("tags", {}, "tags"),
         }),
         typing,
+        // Before htmlPaste: an image on the clipboard is the image, not the HTML that came with it.
+        imageAttachments(async (name, data) => {
+          const d = await fetch(`${server}/api/source/attachment`, {
+            method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ token, edit, name, data }),
+          }).then((r) => r.json()).catch(() => ({ ok: false, error: "Onyx isn’t answering." }));
+          if (!d.ok) throw new Error(d.error || "Onyx couldn’t save it.");
+          return d.embed as string;
+        }, toast),
         htmlPaste,
         toolbar,
         keymap.of(historyKeymap),

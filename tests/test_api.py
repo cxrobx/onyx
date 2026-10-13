@@ -641,6 +641,55 @@ class VaultApiTests(unittest.TestCase):
         loose = self.client.get("/api/source", params={"src": str(loose_note.resolve()), "cap": loose_cap}).json()
         self.assertEqual(suggest("a", loose["edit"]).json()["notes"], [])
 
+    def test_a_pasted_image_is_a_new_file_in_the_vaults_attachment_folder_and_nowhere_else(self) -> None:
+        import base64
+
+        self.set_vault(str(self.vault))
+        note = self.vault / "notes" / "Alpha.md"
+        page = self.client.get("/view", params={"src": str(note), "folder": str(self.vault)})
+        cap = re.search(r'name="askw-doc-token" content="([^"]+)"', page.text).group(1)
+        edit = self.client.get("/api/source", params={"src": str(note.resolve()), "cap": cap}).json()["edit"]
+        png = b"\x89PNG\r\n\x1a\n" + b"\x00" * 64
+
+        def attach(name: str, data: bytes = png, **extra):
+            body = {"token": self.config.token, "edit": edit, "name": name, "data": base64.b64encode(data).decode(), **extra}
+            return self.client.post("/api/source/attachment", json=body)
+
+        # Where Obsidian puts it (the vault's attachment folder, made when missing), linked as Obsidian links it.
+        first = attach("Pasted image 20261013.png").json()
+        self.assertEqual(first, {"ok": True, "embed": "![[Pasted image 20261013.png]]", "name": "Pasted image 20261013.png"})
+        saved = self.vault / "Other" / "Attachments" / "Pasted image 20261013.png"
+        self.assertEqual(saved.read_bytes(), png)
+        # Never over a file: a taken name gets a number. A path in the name names nothing.
+        self.assertEqual(attach("Pasted image 20261013.png").json()["name"], "Pasted image 20261013 1.png")
+        self.assertEqual(attach("../../escape.png").json()["name"], "escape.png")
+        self.assertFalse((self.base / "escape.png").exists())
+        self.assertEqual(saved.read_bytes(), png)
+        # Only whole images of the allowed types, and only with the server token and the note's own capability.
+        self.assertEqual(attach("fake.png", b"<script>alert(1)</script>").status_code, 400)
+        self.assertEqual(attach("page.svg", b"<svg/>").status_code, 400)
+        self.assertEqual(attach("x.png", token="wrong").status_code, 403)
+        self.assertEqual(attach("x.png", edit="forged").status_code, 403)
+        self.assertEqual(
+            self.client.post("/api/source/attachment", json={"token": self.config.token, "edit": edit, "name": "x.png",
+                             "data": base64.b64encode(png).decode()}, headers={"Origin": "https://attacker.example"}).status_code,
+            403,
+        )
+        # An attachment folder that is a link to elsewhere is somebody else's tree: refused, nothing written there.
+        (self.vault / "Other" / "Attachments").rename(self.vault / "Other" / "Kept")
+        (self.vault / "Other" / "Attachments").symlink_to(self.outside, target_is_directory=True)
+        self.assertEqual(attach("linked.png").status_code, 400)
+        self.assertFalse((self.outside / "linked.png").exists())
+
+        # A note in no vault keeps its images beside it, linked by a relative path.
+        loose_note = self.outside.resolve() / "M.md"
+        loose_page = self.client.get("/view", params={"src": str(loose_note)})
+        loose_cap = re.search(r'name="askw-doc-token" content="([^"]+)"', loose_page.text).group(1)
+        loose = self.client.get("/api/source", params={"src": str(loose_note), "cap": loose_cap}).json()["edit"]
+        beside = attach("shot.png", edit=loose).json()
+        self.assertEqual(beside["embed"], "![](shot.png)")
+        self.assertTrue((self.outside / "shot.png").is_file())
+
     def test_hash_suggests_the_vaults_tags_and_note_hash_its_headings(self) -> None:
         self.set_vault(str(self.vault))
         (self.vault / "Beta.md").write_text(
