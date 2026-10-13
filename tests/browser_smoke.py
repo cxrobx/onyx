@@ -2060,7 +2060,7 @@ class BrowserSmokeTests(unittest.TestCase):
 
                     row.click(button="right")
                     expect(menu).to_have_attribute("aria-label", "Page actions")
-                    expect(items).to_have_text(["Open", "Open in New Tab", "Reveal in Finder", "Reveal Link in Finder"])
+                    expect(items).to_have_text(["Open", "Open in New Tab", "Open in Split View", "Reveal in Finder", "Reveal Link in Finder"])
                     expect(row).to_have_class(marked)
                     self.assertEqual(page.evaluate("getSelection().toString()"), "")  # WebKit's word-select is undone
                     # Themed and opaque: the app's elevated surface, not the glass under it.
@@ -2069,12 +2069,12 @@ class BrowserSmokeTests(unittest.TestCase):
 
                     # Holding Option swaps each Reveal for a Copy in place, at the same width.
                     page.keyboard.down("Alt")
-                    expect(items).to_have_text(["Open", "Open in New Tab", "Copy Path", "Copy Link Path"])
+                    expect(items).to_have_text(["Open", "Open in New Tab", "Open in Split View", "Copy Path", "Copy Link Path"])
                     self.assertEqual(menu.evaluate("e => e.getBoundingClientRect().width"), width)
-                    for _ in range(3):
+                    for _ in range(4):
                         page.keyboard.press("ArrowDown")
-                    expect(items.nth(2)).to_be_focused()
-                    self.assertEqual(items.nth(2).evaluate("e => getComputedStyle(e).backgroundColor"), "rgb(58, 131, 247)")
+                    expect(items.nth(3)).to_be_focused()
+                    self.assertEqual(items.nth(3).evaluate("e => getComputedStyle(e).backgroundColor"), "rgb(58, 131, 247)")
                     page.keyboard.press("Enter")  # Option still down: no keypress in Chromium
                     page.keyboard.up("Alt")
                     expect(menu).to_be_hidden()
@@ -2085,8 +2085,8 @@ class BrowserSmokeTests(unittest.TestCase):
                     # An Option-right-click opens straight into the copies.
                     page.keyboard.down("Alt")
                     row.click(button="right")
-                    expect(items.nth(3)).to_have_text("Copy Link Path")
-                    items.nth(3).click()
+                    expect(items.nth(4)).to_have_text("Copy Link Path")
+                    items.nth(4).click()
                     page.keyboard.up("Alt")
                     self.assertEqual(page.evaluate("window.__copied"), [real, str(row_path)])
 
