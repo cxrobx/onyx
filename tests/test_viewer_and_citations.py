@@ -216,6 +216,20 @@ class ViewerAndCitationTests(unittest.TestCase):
             self.assertNotIn("[^note]:", html)
             self.assertLess(html.index("<p>After.</p>"), html.index('<section class="footnotes">'))
 
+    def test_highlights_take_obsidians_colours(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw) / "vault"
+            vault.mkdir()
+            note = vault / "Note.md"
+            note.write_text("A ==🔴red== and ==🟦blue **bold**== and ==plain==, not `==🟢code==`.\n", encoding="utf-8")
+            html = load_local_document(note, folder=str(vault), vault=VaultIndex.build(vault)).html
+            # The colour emoji colours the highlight and isn't shown; a highlight without one is the plain one.
+            self.assertIn('<mark data-highlight="red">red</mark>', html)
+            self.assertIn('<mark data-highlight="blue">blue <strong>bold</strong></mark>', html)
+            self.assertIn("<mark>plain</mark>", html)
+            self.assertIn("<code>==🟢code==</code>", html)
+            self.assertIn('mark[data-highlight="red"]{background:rgb(233 49 71/.3)}', html)
+
     def test_the_editor_draws_callouts_with_the_pages_icons(self) -> None:
         # editor/src/callouts.ts carries a copy of the page's callout icons and aliases, so ⌘E draws a callout's title
         # as the page does; a change to one side alone fails here.

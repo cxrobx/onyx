@@ -6,6 +6,7 @@ import { syntaxTree } from "@codemirror/language";
 import { EditorSelection, StateCommand } from "@codemirror/state";
 import { EditorView } from "@codemirror/view";
 
+import { colourAt } from "./highlight";
 import { narrow } from "./match";
 import { insertLink, LEAD, toggleCheckbox, toggleComment, toggleWrap } from "./typing";
 
@@ -94,6 +95,9 @@ export const clearFormatting: StateCommand = ({ state, dispatch }) => {
         for (let mark = node.node.firstChild; mark; mark = mark.nextSibling) {
           if (SPAN_MARKS.test(mark.name) && !seen.has(mark.from)) { seen.add(mark.from); changes.push({ from: mark.from, to: mark.to }); }
         }
+        // A coloured highlight's colour goes with its marks.
+        const open = node.name === "Highlight" ? node.node.firstChild : null, colour = open ? colourAt(state, open.to) : null;
+        if (open && colour && !seen.has(open.to)) { seen.add(open.to); changes.push({ from: open.to, to: open.to + colour.length }); }
       },
     });
   }

@@ -12,6 +12,7 @@ import type { SyntaxNode } from "@lezer/common";
 import type { DelimiterType, MarkdownConfig } from "@lezer/markdown";
 
 import { calloutIcon, calloutTitle } from "./callouts";
+import { colourAt } from "./highlight";
 
 // `[[Note]]`, `[[Note|Alias]]`, `[[Note#Heading]]` and `![[embed]]`, with the reader's limits: one line, not empty, no
 // nested `[[`. Parsed before Link, as the reader does, so a wikilink is never taken for a reference link.
@@ -415,6 +416,17 @@ function build(view: EditorView): DecorationSet {
             if (underline) out.push(dim.range(underline.from, underline.to));
           }
           return;
+        }
+        // A coloured highlight (`==🔴text==`): its colour, and its emoji shown only while the cursor is in it.
+        if (name === "Highlight") {
+          const shown = touches(node.from, node.to), open = node.getChild("HighlightMark");
+          const colour = open ? colourAt(state, open.to) : null;
+          if (colour && open) {
+            out.push(Decoration.mark({ class: "askw-ed-highlight", attributes: { "data-highlight": colour.colour } }).range(node.from, node.to));
+            out.push((shown ? dim : hide).range(open.to, open.to + colour.length));
+            marks(node, "HighlightMark", shown);
+            return;
+          }
         }
         if (name in INLINE) {
           const [style, mark] = INLINE[name];

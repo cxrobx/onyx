@@ -10,6 +10,7 @@ import { StateCommand } from "@codemirror/state";
 import { EditorView, ViewPlugin, ViewUpdate } from "@codemirror/view";
 
 import { blockquote, checklist, clearFormatting, codeBlock, heading } from "./commands";
+import { COLOURS, setHighlight } from "./highlight";
 import { insertLink, toggleWrap } from "./typing";
 
 const SVG = (paths: string) =>
@@ -46,7 +47,7 @@ const GROUPS: Button[][] = [
   [
     { id: "bold", label: "Bold (⌘B)", icon: ICON.bold, run: toggleWrap("**"), mark: "**" },
     { id: "italic", label: "Italics (⌘I)", icon: ICON.italic, run: toggleWrap("*"), mark: "*" },
-    { id: "highlight", label: "Highlight", icon: ICON.highlight, run: toggleWrap("=="), mark: "==" },
+    { id: "highlight", label: "Highlight colour", icon: ICON.highlight, run: toggleWrap("=="), mark: "==" },
     { id: "strike", label: "Strikethrough", icon: ICON.strike, run: toggleWrap("~~"), mark: "~~" },
     { id: "link", label: "Link (⌘K)", icon: ICON.link, run: insertLink },
   ],
@@ -69,6 +70,7 @@ function wrappedIn(view: EditorView, mark: string): boolean {
 export const toolbar = ViewPlugin.fromClass(class {
   bar: HTMLElement;
   menu: HTMLElement;
+  colours: HTMLElement;
   pressed = false;
   timer = 0;
   shown = false;
@@ -92,7 +94,8 @@ export const toolbar = ViewPlugin.fromClass(class {
         // Pressed without taking focus or the selection from the editor.
         button.addEventListener("mousedown", (e) => e.preventDefault());
         button.addEventListener("click", () => {
-          if (b.id === "heading") { this.toggleMenu(); return; }
+          if (b.id === "heading") { this.toggleMenu(this.menu, button); return; }
+          if (b.id === "highlight") { this.toggleMenu(this.colours, button); return; }
           this.acting = true;
           try { b.run(view); } finally { this.acting = false; }
           view.focus();
@@ -123,6 +126,31 @@ export const toolbar = ViewPlugin.fromClass(class {
       menu.append(item);
     }
     bar.append(menu);
+    // The highlight button's menu: the default highlight, or one of Obsidian's six colours.
+    const colours = this.colours = document.createElement("div");
+    colours.className = "askw-ed-toolbar-menu";
+    colours.setAttribute("role", "menu");
+    colours.hidden = true;
+    for (const [colour, label] of [["", "Default"], ...COLOURS.map(([c, l]) => [c, l])]) {
+      const item = document.createElement("button");
+      item.type = "button";
+      item.setAttribute("role", "menuitem");
+      item.dataset.colour = colour;
+      const swatch = document.createElement("span");
+      swatch.className = "askw-ed-swatch";
+      if (colour) swatch.dataset.highlight = colour;
+      item.append(swatch, label);
+      item.addEventListener("mousedown", (e) => e.preventDefault());
+      item.addEventListener("click", () => {
+        this.acting = true;
+        try { setHighlight(view, colour); } finally { this.acting = false; }
+        colours.hidden = true;
+        view.focus();
+        this.place();
+      });
+      colours.append(item);
+    }
+    bar.append(colours);
     document.body.append(bar);
 
     view.dom.addEventListener("mousedown", this.down);
@@ -172,9 +200,15 @@ export const toolbar = ViewPlugin.fromClass(class {
     clearTimeout(this.timer);
     this.shown = false;
     this.bar.hidden = true;
-    this.menu.hidden = true;
+    this.menu.hidden = this.colours.hidden = true;
   }
-  toggleMenu() { this.menu.hidden = !this.menu.hidden; }
+  // One menu at a time, under its own button.
+  toggleMenu(menu: HTMLElement, button: HTMLElement) {
+    const open = menu.hidden;
+    this.menu.hidden = this.colours.hidden = true;
+    menu.hidden = !open;
+    menu.style.left = `${button.offsetLeft}px`;
+  }
 
   // Above the selection's first line, centred on it; below its last when there's no room above. Measured in the
   // editor's own measure phase: CodeMirror allows no layout reads during an update.

@@ -3398,6 +3398,9 @@ class BrowserSmokeTests(unittest.TestCase):
             ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
             ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
             ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
+            # An opening `==` offers Obsidian's highlight colours; a closing one doesn't.
+            ("a |", ["type:==", "ArrowDown", "Enter", "type:hot=="], "a ==🔴hot==|"),
+            ("a |", ["type:==", "Enter", "type:plain=="], "a ==plain==|"),
             # Slash commands: `/` and a command's name, Enter runs it in place of what was typed; Space leaves the `/`.
             ("Title\n|", ["type:/heading2", "Enter", "type:Sub"], "Title\n## Sub|"),
             ("|", ["type:/checkl", "Enter", "type:x"], "- [ ] x|"),
@@ -3455,7 +3458,7 @@ class BrowserSmokeTests(unittest.TestCase):
                                   document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
                                 }""", [html, plain])
                             else:
-                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "[^" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)) \
+                                if key in ("Enter", "Tab", "ArrowDown") and ("[[" in "".join(keys) or "[^" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys) or "type:==" in "".join(keys)) \
                                         and not after.endswith("\n|"):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
                                 page.keyboard.press(key)
@@ -3540,8 +3543,13 @@ class BrowserSmokeTests(unittest.TestCase):
                     bar.locator("button[data-id=bold]").click()
                     self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some **words** to format here.")
                     expect(bar.locator("button[data-id=bold]")).to_have_class(re.compile("is-on"))
+                    # Highlight is a colour menu: the default, then Obsidian's colours, changed in place.
                     bar.locator("button[data-id=highlight]").click()
+                    frame.locator(".askw-ed-toolbar-menu button", has_text="Default").click()
                     self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some **==words==** to format here.")
+                    bar.locator("button[data-id=highlight]").click()
+                    frame.locator(".askw-ed-toolbar-menu button", has_text="Red").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some **==🔴words==** to format here.")
                     bar.locator("button[data-id=clear]").click()
                     self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some words to format here.")
                     bar.locator("button[data-id=heading]").click()

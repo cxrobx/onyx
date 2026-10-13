@@ -683,6 +683,20 @@ def _highlight_rule(state: Any, silent: bool) -> bool:
     return True
 
 
+# Obsidian's highlight colours: a colour emoji first inside the marks, `==🔴text==`, colours it and isn't shown.
+_HIGHLIGHT_COLOURS = {
+    "🔴": "red", "🟥": "red", "🟠": "orange", "🟧": "orange", "🟡": "yellow", "🟨": "yellow",
+    "🟢": "green", "🟩": "green", "🔵": "blue", "🟦": "blue", "🟣": "purple", "🟪": "purple",
+}
+# Obsidian's own, light then dark, at its 30%.
+_HIGHLIGHT_RGB = {
+    "red": ("233 49 71", "251 70 76"), "orange": ("236 117 0", "233 151 63"), "yellow": ("224 172 0", "224 222 113"),
+    "green": ("8 185 78", "68 207 110"), "blue": ("8 109 221", "2 122 255"), "purple": ("120 82 238", "168 130 255"),
+}
+_HIGHLIGHT_CSS = " ".join(f'mark[data-highlight="{c}"]{{background:rgb({light}/.3)}}' for c, (light, _) in _HIGHLIGHT_RGB.items()) + \
+    " @media(prefers-color-scheme:dark){" + " ".join(f'mark[data-highlight="{c}"]{{background:rgb({dark}/.3)}}' for c, (_, dark) in _HIGHLIGHT_RGB.items()) + "}"
+
+
 def _pair_highlights(state: Any, delimiters: list) -> None:
     lone = []
     for start in delimiters:
@@ -692,6 +706,10 @@ def _pair_highlights(state: Any, delimiters: list) -> None:
         for index, kind, nesting in ((start.token, "mark_open", 1), (end.token, "mark_close", -1)):
             token = state.tokens[index]
             token.type, token.tag, token.nesting, token.markup, token.content = kind, "mark", nesting, "==", ""
+        first = state.tokens[start.token + 1] if start.token + 1 < len(state.tokens) else None
+        if first is not None and first.type == "text" and first.content[:1] in _HIGHLIGHT_COLOURS:
+            state.tokens[start.token].attrSet("data-highlight", _HIGHLIGHT_COLOURS[first.content[:1]])
+            first.content = first.content[1:]
         before = state.tokens[end.token - 1]
         if before.type == "text" and before.content == "=":
             lone.append(end.token - 1)
@@ -1175,7 +1193,7 @@ hr{{border:0;border-top:1px solid rgb(var(--reader-line)/.14);margin:2em 0}} img
 .askw-properties{{margin:0 0 1.6em;padding:9px 14px;border:1px solid rgb(var(--reader-line)/.12);border-radius:10px;background:rgb(var(--reader-code)/.5);font-size:.88em}} .askw-properties summary{{cursor:pointer;color:rgb(var(--reader-muted));font-weight:600;letter-spacing:.02em}}
 .askw-properties dl{{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:4px 18px;margin:10px 0 2px}} .askw-properties dt{{color:rgb(var(--reader-muted));font-weight:600}} .askw-properties dd{{margin:0;overflow-wrap:anywhere}} .askw-properties pre{{margin:8px 0 0}} .askw-empty{{color:rgb(var(--reader-faint))}}
 li.askw-task{{list-style:none}} .askw-task-box{{margin:0 .55em 0 -1.45em;vertical-align:-.1em;cursor:pointer}} li.askw-task.is-done>.askw-task-label,li.askw-task.is-done>p>.askw-task-label{{color:rgb(var(--reader-faint));text-decoration:line-through}}
-mark{{padding:0 .1em;border-radius:3px;background:rgb(255 208 0/.4);color:inherit}}
+mark{{padding:0 .1em;border-radius:3px;background:rgb(255 208 0/.4);color:inherit}} {_HIGHLIGHT_CSS}
 .askw-tag{{display:inline-block;margin:0 4px 2px 0;padding:1px 8px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}} main :is(p,li,td,th,.callout-title-inner)>.askw-tag{{margin:0}}
 .askw-wikilink-missing{{border-bottom:1px dotted rgb(var(--reader-faint));color:rgb(var(--reader-muted));cursor:help}} a.askw-embed{{display:inline-block;padding:1px 8px;border:1px dashed rgb(var(--reader-line)/.25);border-radius:6px;text-decoration:none}} a.askw-embed::before{{content:"⧉ ";opacity:.6}}
 {_CALLOUT_CSS}

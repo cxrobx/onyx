@@ -10,6 +10,7 @@ import { EditorState, Extension, Prec } from "@codemirror/state";
 import { EditorView, keymap } from "@codemirror/view";
 
 import { slashSource } from "./commands";
+import { colourSource, swatchFor } from "./highlight";
 import { narrow } from "./match";
 
 export interface NoteName { name: string; folder: string; link: string }
@@ -173,6 +174,8 @@ export function suggesters(lookups: Lookups): Extension {
       // By name first; then by path, for a name typed with its folder.
       const byName = narrow(all, query, (n) => n.name), seen = new Set(byName);
       const notes = [...byName, ...narrow(all, query, (n) => n.link).filter((n) => !seen.has(n))].slice(0, 30);
+      // A name typed in full: its headings are asked for now, so a `#` typed next finds them already here.
+      if (notes.some((n) => n.link.toLowerCase() === query.trim().toLowerCase())) headingsOf(query);
       if (!notes.length) return null;
       return {
         from: typed.from + 2,
@@ -210,7 +213,8 @@ export function suggesters(lookups: Lookups): Extension {
   }
 
   return [
-    autocompletion({ override: [vaultHeadingsSource, headingsSource, notesSource, footnotesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
+    autocompletion({ override: [vaultHeadingsSource, headingsSource, notesSource, footnotesSource, tagsSource, slashSource, colourSource], icons: false,
+      addToOptions: [{ render: swatchFor, position: 20 }], closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
     Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
   ];
 }
