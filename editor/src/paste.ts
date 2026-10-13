@@ -71,7 +71,9 @@ export function htmlToMarkdown(html: string): string | null {
       cell.replaceWith(th);
     }
   }
-  const md = converter().turndown(doc.body).replace(/^\n+|\s+$/g, "");
+  // WebKit hands pasted HTML over re-serialised, with the spaces beside a link or a bold word as &nbsp;: plain spaces in
+  // Markdown, or `**now**` beside one may not read as bold, and the note carries characters no one typed.
+  const md = converter().turndown(doc.body).replace(/\u00a0/g, " ").replace(/^\n+|\s+$/g, "");
   return md || null;
 }
 

@@ -3407,6 +3407,8 @@ class BrowserSmokeTests(unittest.TestCase):
             ("|", ["html:<table><tr><td>Name</td><td>Qty</td></tr><tr><td>Apples</td><td>3</td></tr></table>\0Name\tQty"],
              "| Name | Qty |\n| --- | --- |\n| Apples | 3 ||"),
             ("|", ["html:<div style='white-space: pre;'><div><span>a = 1</span></div><div><span>a++</span></div></div>\0a = 1\na++"], "a = 1\na++|"),
+            # As WebKit hands a real paste over: the spaces beside inline tags as &nbsp;, which come in as plain spaces.
+            ("|", ["html:<p>Read&nbsp;<a href='https://x.com'>it</a>&nbsp;and&nbsp;<b>now</b>.</p>\0Read it and now."], "Read [it](https://x.com) and **now**.|"),
             ("```\n|\n```", ["html:<b>x</b>\0x"], "```\nx|\n```"),
             ("|", ["html:<p>hi<img src=x onerror='window.top.__pwned=1'><script>window.top.__pwned=1</script></p>\0hi"], "hi![](x)|"),
         ]
