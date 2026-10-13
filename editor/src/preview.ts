@@ -433,6 +433,12 @@ function build(view: EditorView): DecorationSet {
               out.push(dim.range(node.from, node.to + fold));
               return false;
             }
+            // A footnote's `[^label]`: a small raised label, as on the page; its source while the cursor is on it.
+            if (/^\[\^[^\]\s]+\]$/.test(doc.sliceString(node.from, node.to)) && doc.sliceString(node.to, node.to + 1) !== ":") {
+              if (touches(node.from, node.to)) { out.push(dim.range(node.from, node.from + 2), dim.range(node.to - 1, node.to)); return false; }
+              out.push(hide.range(node.from, node.from + 2), cls("askw-ed-fnref").range(node.from + 2, node.to - 1), hide.range(node.to - 1, node.to));
+              return false;
+            }
             const linkMarks = node.getChildren("LinkMark");
             if (linkMarks.length < 2) return;
             const [open, close] = linkMarks, url = node.getChild("URL");

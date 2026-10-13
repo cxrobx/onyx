@@ -125,6 +125,46 @@ export function suggesters(lookups: Lookups): Extension {
     });
   }
 
+  // `[^`: the note's footnotes, and a new one, which takes the next free number and gets its `[^n]: ` line at the
+  // note's end, where the cursor goes to write it (Obsidian's "Insert footnote").
+  function footnotesSource(context: CompletionContext) {
+    const typed = context.matchBefore(/\[\^[^\]\s]*$/);
+    if (!typed || typed.text.startsWith("[[")) return null;
+    const doc = context.state.doc.toString(), defs = new Map<string, string>();
+    for (const m of doc.matchAll(/^\[\^([^\]\s]+)\]:[ \t]?(.*)$/gm)) if (!defs.has(m[1])) defs.set(m[1], m[2]);
+    const query = typed.text.slice(2);
+    const existing = narrow([...defs.keys()], query, (label) => label + " " + defs.get(label));
+    const numbers = [...defs.keys()].map(Number).filter(Number.isInteger);
+    const fresh = String((numbers.length ? Math.max(...numbers) : 0) + 1);
+    const step = (view: EditorView, label: string, from: number, to: number) => {
+      const closed = view.state.sliceDoc(to, to + 1) === "]";
+      return { from, to, insert: closed ? label : label + "]" };
+    };
+    const create = {
+          label: "New footnote", detail: `[^${fresh}]`,
+          apply(view: EditorView, _c: Completion, from: number, to: number) {
+            const ref = step(view, fresh, from, to), end = view.state.doc.length;
+            const tail = view.state.sliceDoc(Math.max(0, end - 2), end), gap = !end ? "" : tail.endsWith("\n\n") ? "" : tail.endsWith("\n") ? "\n" : "\n\n";
+            const line = `${gap}[^${fresh}]: `;
+            view.dispatch({
+              changes: [ref, { from: end, insert: line }],
+              selection: { anchor: end + (ref.insert.length - (to - from)) + line.length },
+              userEvent: "input.complete",
+              scrollIntoView: true,
+            });
+          },
+        };
+    const picks = existing.map((label) => ({
+          label, detail: (defs.get(label) || "").slice(0, 60),
+          apply(view: EditorView, _c: Completion, from: number, to: number) {
+            const ref = step(view, label, from, to);
+            view.dispatch({ changes: ref, selection: { anchor: from + label.length + 1 }, userEvent: "input.complete" });
+          },
+        }));
+    // What was typed names a footnote: that one first. Otherwise a new one.
+    return { from: typed.from + 2, filter: false, options: query && picks.length ? [...picks, create] : [create, ...picks] };
+  }
+
   function notesSource(context: CompletionContext) {
     const typed = context.matchBefore(/\[\[[^[\]|#^\n]*$/);
     if (!typed) return null;
@@ -170,7 +210,7 @@ export function suggesters(lookups: Lookups): Extension {
   }
 
   return [
-    autocompletion({ override: [vaultHeadingsSource, headingsSource, notesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
+    autocompletion({ override: [vaultHeadingsSource, headingsSource, notesSource, footnotesSource, tagsSource, slashSource], icons: false, closeOnBlur: true, maxRenderedOptions: 30, interactionDelay: 0, activateOnTypingDelay: 0 }),
     Prec.highest(keymap.of([{ key: "Tab", run: acceptCompletion }])),
   ];
 }

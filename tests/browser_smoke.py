@@ -3392,6 +3392,9 @@ class BrowserSmokeTests(unittest.TestCase):
             ("See |", ["type:[[read", "Tab", "type: next"], "See [[Reading List]] next|"),
             ("See |", ["type:[[Roadmap#mil", "Enter"], "See [[Roadmap#Milestones]]|"),
             ("See |", ["type:[[##miles", "Enter"], "See [[Roadmap#Milestones]]|"),  # headings across the vault
+            # `[^`: the note's footnotes by name, or a new one, numbered next and defined at the note's end.
+            ("See|\n\n[^note]: the note", ["type:[^no", "Enter"], "See[^note]|\n\n[^note]: the note"),
+            ("Text|\n\n[^1]: one", ["type:[^", "Enter", "type:two"], "Text[^2]\n\n[^1]: one\n\n[^2]: two|"),
             ("# Top\n\n## Local part\n\nGo |", ["type:[[#loc", "Enter"], "# Top\n\n## Local part\n\nGo [[#Local part]]|"),
             ("Tagged |", ["type:#onyx", "Enter"], "Tagged #onyx/plan |"),
             ("```\n|\n```", ["type:#rea"], "```\n#rea|\n```"),  # no tags in code
@@ -3452,7 +3455,7 @@ class BrowserSmokeTests(unittest.TestCase):
                                   document.querySelector('.cm-content').dispatchEvent(new ClipboardEvent('paste', {clipboardData: data, bubbles: true, cancelable: true}));
                                 }""", [html, plain])
                             else:
-                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)) \
+                                if key in ("Enter", "Tab") and ("[[" in "".join(keys) or "[^" in "".join(keys) or "type:#" in "".join(keys) or "type:/" in "".join(keys)) \
                                         and not after.endswith("\n|"):
                                     expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
                                 page.keyboard.press(key)

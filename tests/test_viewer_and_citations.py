@@ -192,6 +192,30 @@ class ViewerAndCitationTests(unittest.TestCase):
             with self.assertRaises(SourceConflict):
                 set_task(path, 4, False, base="stale")
 
+    def test_notes_render_footnotes_numbered_by_first_use_and_listed_at_the_end(self) -> None:
+        with tempfile.TemporaryDirectory() as raw:
+            vault = Path(raw) / "vault"
+            vault.mkdir()
+            note = vault / "Note.md"
+            note.write_text(
+                "A claim[^1] and another[^note], again[^1]. Not [^missing], nor `[^1]`.\n\n"
+                "[^note]: Second, with **bold** and <b>raw</b>.\n[^1]: First\n  continued.\n\nAfter.\n",
+                encoding="utf-8",
+            )
+            html = load_local_document(note, folder=str(vault), vault=VaultIndex.build(vault)).html
+            # Numbered by first use, a second use the same number; one nothing defines, and code, stay text.
+            self.assertIn('claim<sup class="footnote-ref"><a href="#fn-1" id="fnref-1-1">1</a></sup>', html)
+            self.assertIn('another<sup class="footnote-ref"><a href="#fn-2" id="fnref-2-1">2</a></sup>', html)
+            self.assertIn('again<sup class="footnote-ref"><a href="#fn-1" id="fnref-1-2">1</a></sup>', html)
+            self.assertIn("Not [^missing], nor <code>[^1]</code>.", html)
+            # Gathered at the end, in that order, rendered as the note is: raw HTML still text.
+            listed = html[html.index('<section class="footnotes">'):]
+            self.assertLess(listed.index('id="fn-1"'), listed.index('id="fn-2"'))
+            self.assertIn("First<br>\ncontinued.", listed)
+            self.assertIn("Second, with <strong>bold</strong> and &lt;b&gt;raw&lt;/b&gt;.", listed)
+            self.assertNotIn("[^note]:", html)
+            self.assertLess(html.index("<p>After.</p>"), html.index('<section class="footnotes">'))
+
     def test_the_editor_draws_callouts_with_the_pages_icons(self) -> None:
         # editor/src/callouts.ts carries a copy of the page's callout icons and aliases, so ⌘E draws a callout's title
         # as the page does; a change to one side alone fails here.

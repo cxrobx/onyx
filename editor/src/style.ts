@@ -62,6 +62,7 @@ body .askw-ed .askw-ed-callout-fold{display:inline-flex;vertical-align:-.12em;ma
 body .askw-ed .askw-ed-callout-fold.is-open{transform:rotate(90deg)}
 body .askw-ed .cm-line.askw-ed-callout-folded{display:none}
 ${CALLOUT_COLOURS}
+body .askw-ed .askw-ed-fnref{font-size:.75em;vertical-align:super;line-height:0;color:rgb(var(--reader-accent))}
 body .askw-ed .askw-ed-tag{padding:1px 6px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}
 body .askw-ed .askw-ed-comment{color:rgb(var(--reader-faint))}
 body .askw-ed .askw-ed-bullet{display:inline-block;min-width:.6em;text-align:center;color:rgb(var(--reader-muted))}

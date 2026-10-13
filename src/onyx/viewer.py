@@ -921,6 +921,71 @@ def _comment_inline(state: Any, silent: bool) -> bool:
     return True
 
 
+# Footnotes, as Obsidian draws them: ``[^label]`` is a numbered superscript, numbered by first use, and each
+# ``[^label]: text`` line (with any indented lines under it) is gathered into a list at the note's end, with a way back
+# to where it was cited. A label nothing defines stays text.
+_FOOTNOTE_DEF_RE = re.compile(r"\[\^([^\]\s]+)\]:[ \t]?(.*)")
+
+
+def _footnote_def(state: Any, start: int, end: int, silent: bool) -> bool:
+    if state.sCount[start] - state.blkIndent >= 4:
+        return False
+    pos, line_end = state.bMarks[start] + state.tShift[start], state.eMarks[start]
+    found = _FOOTNOTE_DEF_RE.match(state.src[pos:line_end])
+    if not found:
+        return False
+    if silent:
+        return True
+    lines, line = [found.group(2)], start + 1
+    while line < end and state.sCount[line] - state.blkIndent >= 2 and not state.isEmpty(line):
+        lines.append(state.src[state.bMarks[line] + state.tShift[line] : state.eMarks[line]])
+        line += 1
+    defs = state.env.setdefault("askw_footnotes", {})
+    defs.setdefault(found.group(1), "\n".join(lines).strip())
+    state.line = line
+    return True
+
+
+def _footnote_ref(state: Any, silent: bool) -> bool:
+    if not state.src.startswith("[^", state.pos):
+        return False
+    close = state.src.find("]", state.pos + 2, state.posMax)
+    label = state.src[state.pos + 2 : close] if close > 0 else ""
+    defs = (state.env or {}).get("askw_footnotes") or {}
+    if not label or any(ch.isspace() for ch in label) or label not in defs:
+        return False
+    if not silent:
+        order = state.env.setdefault("askw_footnote_order", [])
+        if label not in order:
+            order.append(label)
+        counts = state.env.setdefault("askw_footnote_uses", {})
+        counts[label] = counts.get(label, 0) + 1
+        token = state.push("askw_footnote_ref", "sup", 0)
+        token.meta = {"n": order.index(label) + 1, "use": counts[label]}
+    state.pos = close + 1
+    return True
+
+
+def _footnote_list(state: Any) -> None:
+    if not state.inlineMode and state.env.get("askw_footnote_order"):
+        state.tokens.append(Token("askw_footnotes", "section", 0))
+
+
+def _render_footnote_ref(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    n, use = tokens[idx].meta["n"], tokens[idx].meta["use"]
+    return f'<sup class="footnote-ref"><a href="#fn-{n}" id="fnref-{n}-{use}">{n}</a></sup>'
+
+
+def _render_footnotes(self: Any, tokens: Any, idx: int, options: Any, env: Any) -> str:
+    items = []
+    defs, order = env.get("askw_footnotes") or {}, list(env.get("askw_footnote_order") or [])
+    for n, label in enumerate(order, 1):
+        # Rendered as the note is (raw HTML still escaped), with its own refs drawn as text: no numbering inside.
+        inner = _MARKDOWN.renderInline(defs.get(label, ""), {**env, "askw_footnotes": {}, "askw_footnote_order": []})
+        items.append(f'<li id="fn-{n}"><p>{inner} <a href="#fnref-{n}-1" class="footnote-backref" aria-label="Back to the text">↩︎</a></p></li>')
+    return '<section class="footnotes"><hr><ol>' + "".join(items) + "</ol></section>\n"
+
+
 _TAG_RE = re.compile(r"#([^\W][\w/-]*)")
 
 
@@ -1024,6 +1089,12 @@ def _build_markdown() -> MarkdownIt:
     # After ``text_join``, which merges the ``[`` and `` ]`` of a box into the text they open.
     md.core.ruler.push("askw_tasks", _task_lists)
     md.core.ruler.push("askw_bare_urls", _bare_urls)
+    # Before ``reference``, which would read ``[^1]: text`` as a link definition; refs before ``link`` for the same.
+    md.block.ruler.before("reference", "askw_footnote_def", _footnote_def, {"alt": ["paragraph", "reference"]})
+    md.inline.ruler.before("link", "askw_footnote_ref", _footnote_ref)
+    md.core.ruler.push("askw_footnotes", _footnote_list)
+    md.add_render_rule("askw_footnote_ref", _render_footnote_ref)
+    md.add_render_rule("askw_footnotes", _render_footnotes)
     md.add_render_rule("link_open", _render_link_open)
     md.add_render_rule("askw_task", _render_task)
     md.add_render_rule("softbreak", _render_softbreak)
@@ -1108,6 +1179,7 @@ mark{{padding:0 .1em;border-radius:3px;background:rgb(255 208 0/.4);color:inheri
 .askw-tag{{display:inline-block;margin:0 4px 2px 0;padding:1px 8px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}} main :is(p,li,td,th,.callout-title-inner)>.askw-tag{{margin:0}}
 .askw-wikilink-missing{{border-bottom:1px dotted rgb(var(--reader-faint));color:rgb(var(--reader-muted));cursor:help}} a.askw-embed{{display:inline-block;padding:1px 8px;border:1px dashed rgb(var(--reader-line)/.25);border-radius:6px;text-decoration:none}} a.askw-embed::before{{content:"⧉ ";opacity:.6}}
 {_CALLOUT_CSS}
+sup.footnote-ref{{line-height:0}} sup.footnote-ref a{{padding:0 .15em;text-decoration:none}} .footnotes{{margin-top:2.5em;color:rgb(var(--reader-muted));font-size:.9em}} .footnotes hr{{margin:0 0 1em}} .footnote-backref{{text-decoration:none}}
 @media(prefers-color-scheme:dark){{:root{{--reader-bg:24 24 24;--reader-pane:31 31 31;--reader-ink:245 245 245;--reader-muted:205 205 205;--reader-faint:143 143 143;--reader-line:255 255 255;--reader-code:48 48 48}} body{{background:rgb(var(--reader-bg)/.70)}} main{{background:rgb(var(--reader-pane)/.78);box-shadow:0 18px 60px rgb(0 0 0/.28)}}}}
 @media(max-width:720px){{main{{padding:36px 24px}}}}
 @media(prefers-reduced-transparency:reduce){{body,main,.askw-pdf-page{{backdrop-filter:none}} body{{background:rgb(var(--reader-bg))}} main{{background:rgb(var(--reader-pane))}}}}
