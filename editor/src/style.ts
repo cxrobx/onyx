@@ -27,6 +27,9 @@ body .askw-ed .cm-editor.cm-focused{outline:none}
 body .askw-ed .cm-scroller{font-family:inherit;line-height:inherit;overflow:visible}
 body .askw-ed .cm-content{padding:0;caret-color:rgb(var(--reader-accent))}
 body .askw-ed .cm-line{padding:0}
+body .askw-ed .cm-cursor,body .askw-ed .cm-dropCursor{border-left:2px solid rgb(var(--reader-accent))}
+body .askw-ed .cm-editor > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:rgb(var(--reader-accent)/.14)}
+body .askw-ed .cm-editor.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground{background:rgb(var(--reader-accent)/.26)}
 body .askw-ed .cm-line.askw-ed-h{font-weight:700;line-height:1.2;letter-spacing:-.02em}
 body .askw-ed .cm-line.askw-ed-h1{font-size:2.35rem;padding-top:.3em}
 body .askw-ed .cm-line.askw-ed-h2{font-size:1.5em;padding-top:.5em}
@@ -68,6 +71,13 @@ body .askw-ed .askw-ed-grid :is(th,td){cursor:text}
 body .askw-ed .askw-ed-find{background:rgb(255 212 0/.4)}
 body .askw-ed .askw-ed-find-current{background:rgb(255 150 0);color:rgb(20 20 20)}
 body .askw-ed .cm-line.askw-ed-frontmatter{font:13px/1.7 ${MONO};color:rgb(var(--reader-muted));background:rgb(var(--reader-code)/.5);padding:0 14px}
+body .askw-ed .cm-tooltip.cm-tooltip-autocomplete{padding:4px;border:1px solid rgb(var(--reader-line)/.14);border-radius:8px;background:rgb(var(--reader-pane));box-shadow:0 8px 24px rgb(0 0 0/.14);font:14px/1.4 -apple-system,BlinkMacSystemFont,sans-serif}
+body .askw-ed .cm-tooltip.cm-tooltip-autocomplete > ul{max-height:16em;min-width:16em;max-width:min(32em,90vw);font-family:inherit}
+body .askw-ed .cm-tooltip.cm-tooltip-autocomplete > ul > li{display:flex;align-items:baseline;gap:10px;padding:4px 8px;border-radius:5px;color:inherit}
+body .askw-ed .cm-tooltip.cm-tooltip-autocomplete > ul > li[aria-selected]{background:rgb(var(--reader-accent)/.16);color:inherit}
+body .askw-ed .cm-tooltip-autocomplete .cm-completionLabel{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis}
+body .askw-ed .cm-tooltip-autocomplete .cm-completionMatchedText{text-decoration:none;font-weight:600}
+body .askw-ed .cm-tooltip-autocomplete .cm-completionDetail{margin-left:auto;font-style:normal;font-size:12px;color:rgb(var(--reader-faint));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .askw-ed-conflict{position:sticky;top:10px;z-index:5;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0 0 18px;padding:9px 12px;border:1px solid rgb(var(--reader-line)/.14);border-radius:10px;background:rgb(var(--reader-pane));box-shadow:0 8px 24px rgb(0 0 0/.12);font-size:14px}
 .askw-ed-conflict[hidden]{display:none}
 .askw-ed-conflict span{flex:1 1 220px}

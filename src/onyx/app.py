@@ -1069,6 +1069,34 @@ def create_app(config: AppConfig) -> FastAPI:
         href = await asyncio.to_thread(resolve)
         return JSONResponse({"ok": href is not None, "href": href}, headers={"Cache-Control": "no-store"})
 
+    @app.get("/api/source/notes")
+    async def note_suggestions(request: Request, edit: str, q: str = ""):
+        """The notes a ``[[`` typed in the editor can link to: names in the edited note's own vault, nothing else, and
+        never their text. ``link`` is what goes between the brackets, the bare name unless another note shares it."""
+        if denied := api_forbidden(request):
+            return denied
+        opened = editing(edit)
+        if not opened:
+            return JSONResponse({"ok": False, "error": "Reload this page to link notes."}, status_code=403)
+
+        def suggest() -> list[dict[str, str]]:
+            notes = opened.get("notes")
+            index = app.state.vault.get(Path(notes)) if notes else None
+            if index is None:
+                return []
+            found = index.search(q[:200])[0] if q.strip() else sorted(index.notes, key=lambda n: (n.depth, n.rel.casefold()))
+            out = []
+            for item in found:
+                if item.kind != "note" or item.missing:
+                    continue
+                out.append({"name": os.path.splitext(item.name)[0], "folder": item.folder, "link": index.link_target(item)})
+                if len(out) == 30:
+                    break
+            return out
+
+        notes = await asyncio.to_thread(suggest)
+        return JSONResponse({"ok": True, "notes": notes}, headers={"Cache-Control": "no-store"})
+
     # MARK: - Library, settings, and diagnostics APIs
 
     def api_forbidden(request: Request) -> JSONResponse | None:

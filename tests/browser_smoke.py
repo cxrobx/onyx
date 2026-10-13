@@ -3311,6 +3311,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(status).to_have_text("Editing · Saved", timeout=5000)
                     self.assertIn("\n- one\n- two\n- three\nAfter the list.\n", note.read_text(encoding="utf-8"))
                     reader.evaluate("y => scrollTo(0, y)", reading_at)
+                    expect(frame.locator(".cm-line", has_text="Target paragraph")).to_have_count(1)  # drawn on the next frame
 
                     # ⌘E again: the page, re-rendered from the file, with the edited paragraph where the editor had it.
                     reader.evaluate("""() => {
@@ -3352,6 +3353,83 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(frame.locator(".askw-ed")).to_have_count(0)
                     browser.close()
 
+        self.assertEqual(page_errors, [])
+
+    def test_typing_in_the_editor_does_what_it_does_in_obsidian(self) -> None:
+        # Obsidian's defaults (Smart lists, Auto-pair brackets and Markdown syntax, Indent using tabs) and its default
+        # hotkeys, and `[[` suggesting the vault's notes. Each case starts from a fresh text, `|` the cursor and «»
+        # a selection, and is checked the same way.
+        notes = self.root / "TypingVault"
+        (notes / "Projects").mkdir(parents=True, exist_ok=True)
+        note = notes / "Typing.md"
+        note.write_text("start\n", encoding="utf-8")
+        (notes / "Projects" / "Roadmap.md").write_text("# Roadmap\n", encoding="utf-8")
+        (notes / "Reading List.md").write_text("# Reading\n", encoding="utf-8")
+        self.app.state.storage.update_settings({"vault_root": str(notes)}, model_default="sonnet")
+        self.app.state.vault.invalidate()
+        cases = [
+            ("- one|", ["Enter", "type:two"], "- one\n- two|"),
+            ("- a\n- b|", ["Enter", "Enter"], "- a\n- b\n|"),                       # an empty item ends the list
+            ("- a\n\t- b|", ["Enter", "Enter"], "- a\n\t- b\n- |"),                  # or comes out a level
+            ("- [x] done|", ["Enter"], "- [x] done\n- [ ] |"),
+            ("1. a|\n2. b", ["Enter", "type:x"], "1. a\n2. x|\n3. b"),
+            ("> q|", ["Enter", "Enter"], "> q\n|"),
+            ("- a\n- b|", ["Tab"], "- a\n\t- b|"),
+            ("- one|", ["Shift+Enter", "type:more"], "- one\n  more|"),
+            ("a |", ["type:(x)"], "a (x)|"),
+            ("don|", ["type:'t"], "don't|"),
+            ("a |", ["type:**b**"], "a **b**|"),
+            ("|", ["type:* x"], "* x|"),
+            ("a |", ["type:(", "Backspace"], "a |"),
+            ("a «sel» b", ["type:=="], "a ==«sel»== b"),
+            ("- a|", ["Meta+l"], "- [ ] a|"),
+            ("- [ ] a|", ["Meta+l"], "- [x] a|"),
+            ("«txt»", ["Meta+k"], "[txt](|)"),
+            ("a b|", ["Meta+/"], "%%a b|%%"),
+            ("See |", ["type:[[road"], "See [[road|]]"),
+            ("See |", ["type:[[road", "Enter"], "See [[Roadmap]]|"),
+            ("See |", ["type:[[read", "Tab", "type: next"], "See [[Reading List]] next|"),
+        ]
+        shown = """() => { const t = askwEditor.text(), s = askwEditor.selection();
+          return s.from === s.to ? t.slice(0, s.from) + '|' + t.slice(s.from)
+            : t.slice(0, s.from) + '«' + t.slice(s.from, s.to) + '»' + t.slice(s.to); }"""
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    reader = page.frame(name="reader")
+                    frame.locator("main > p").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    for before, keys, after in cases:
+                        text = before.replace("|", "").replace("«", "").replace("»", "")
+                        start = before.find("«") if "«" in before else before.index("|")
+                        end = before.find("»") - 1 if "«" in before else start
+                        # Through the editor's own view, as a reload from disk would: no save, no draft.
+                        reader.evaluate("""([text, from, to]) => {
+                          const view = document.querySelector('.cm-content').cmTile.root.view;  // CodeMirror's own, as findFromDOM reads it
+                          view.dispatch({changes: {from: 0, to: view.state.doc.length, insert: text}, selection: {anchor: from, head: to}});
+                          view.focus();
+                        }""", [text, start, end])
+                        for key in keys:
+                            if key.startswith("type:"):
+                                page.keyboard.type(key[5:])
+                            else:
+                                if key in ("Enter", "Tab") and "[[" in "".join(keys):
+                                    expect(frame.locator(".cm-tooltip-autocomplete li").first).to_be_visible()
+                                page.keyboard.press(key)
+                        if after.endswith("|]]") and "[[" in after:
+                            expect(frame.locator(".cm-tooltip-autocomplete li")).to_have_count(1)
+                            expect(frame.locator(".cm-tooltip-autocomplete li").first).to_contain_text("Roadmap")
+                            expect(frame.locator(".cm-tooltip-autocomplete li").first).to_contain_text("Projects")
+                            page.keyboard.press("Escape")
+                        self.assertEqual(reader.evaluate(shown), after, (engine, before, keys))
+                    browser.close()
         self.assertEqual(page_errors, [])
 
     def test_callouts_fold_on_the_page_and_wear_their_colour_while_editing(self) -> None:

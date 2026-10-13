@@ -5,17 +5,19 @@
 // focus leaves the page, and as the page goes away. Each save names the version of the file it was written against;
 // the server refuses one whose file changed on disk meanwhile (another editor, an agent, a sync), and the editor asks
 // which to keep instead of overwriting either.
-import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
+import { history, historyKeymap } from "@codemirror/commands";
 import { ensureSyntaxTree, Language, LanguageSupport, syntaxTree } from "@codemirror/language";
 import { commonmarkLanguage, markdownKeymap } from "@codemirror/lang-markdown";
 import { yamlFrontmatter } from "@codemirror/lang-yaml";
-import { EditorSelection, EditorState, Prec, StateCommand, StateEffect, StateField } from "@codemirror/state";
+import { EditorState, Prec, StateEffect, StateField } from "@codemirror/state";
 import { Decoration, DecorationSet, EditorView, keymap } from "@codemirror/view";
 import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer/markdown";
 
 import { lineChanges } from "./diff";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { CSS } from "./style";
+import { noteLinks, NoteName } from "./suggest";
+import { typing } from "./typing";
 
 /**
  * Where the top of the window is in a note, in terms the reading page and the editor share: the note's top-level blocks
@@ -54,27 +56,6 @@ const markdownSupport = new LanguageSupport(
   new Language(commonmarkLanguage.data, (commonmarkLanguage.parser as MarkdownParser).configure([Table, Strikethrough, TaskList, Autolink, highlights, wikilinks, comments, hashtags]), [], "markdown"),
   [Prec.high(keymap.of(markdownKeymap))],
 );
-
-// ⌘B and ⌘I, as Obsidian binds them: wrap the selection, or unwrap it when it is already wrapped.
-function toggleWrap(mark: string): StateCommand {
-  return ({ state, dispatch }) => {
-    const n = mark.length;
-    dispatch(state.update(state.changeByRange((range) => {
-      const before = state.sliceDoc(range.from - n, range.from), after = state.sliceDoc(range.to, range.to + n);
-      if (before === mark && after === mark) {
-        return {
-          changes: [{ from: range.from - n, to: range.from }, { from: range.to, to: range.to + n }],
-          range: EditorSelection.range(range.from - n, range.to - n),
-        };
-      }
-      return {
-        changes: [{ from: range.from, insert: mark }, { from: range.to, insert: mark }],
-        range: EditorSelection.range(range.from + n, range.to + n),
-      };
-    }), { userEvent: "input", scrollIntoView: true }));
-    return true;
-  };
-}
 
 // The note's top-level Markdown blocks, as the reader renders each one as a child of its `<main>`. A link reference
 // definition renders nothing there, and the frontmatter is the Properties box, so neither is counted.
@@ -328,14 +309,11 @@ export async function open(options: OpenOptions): Promise<Session> {
         tables,
         findMarks,
         imageSource.of(images),
-        keymap.of([
-          { key: "Mod-s", run: () => { save(); return true; }, preventDefault: true },
-          { key: "Mod-b", run: toggleWrap("**") },
-          { key: "Mod-i", run: toggleWrap("*") },
-          indentWithTab,
-          ...defaultKeymap,
-          ...historyKeymap,
-        ]),
+        keymap.of([{ key: "Mod-s", run: () => { save(); return true; }, preventDefault: true }]),
+        noteLinks((q) => fetch(`${server}/api/source/notes?${new URLSearchParams({ edit, q })}`, { cache: "no-store" })
+          .then((r) => r.json()).then((d) => (d.ok ? d.notes as NoteName[] : [])).catch(() => [])),
+        typing,
+        keymap.of(historyKeymap),
         EditorView.contentAttributes.of({ spellcheck: "true", autocorrect: "on", autocapitalize: "sentences" }),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return;

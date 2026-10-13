@@ -1121,6 +1121,12 @@ class VaultIndex:
         markdown = [item for item in candidates if item.path.suffix.lower() in {".md", ".markdown"}]
         return self._pick(markdown or candidates, source)
 
+    def link_target(self, item: VaultFile) -> str:
+        """What a ``[[link]]`` to ``item`` holds: its bare name, or its path when another note shares the name."""
+        if len(self._by_stem.get(item.stem_key, [])) == 1:
+            return os.path.splitext(item.name)[0]
+        return os.path.splitext(item.rel)[0]
+
     def resolve_embed(self, target: str, *, source: Path | None = None) -> VaultFile | None:
         """Resolve ``![[target]]``: attachments by full filename, notes by name."""
         target = target.strip().strip("/")

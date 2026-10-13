@@ -613,6 +613,34 @@ class VaultApiTests(unittest.TestCase):
         outside_note = self.client.get("/view", params={"src": str(self.outside / "L.md")})
         self.assertIn("[[M]]", outside_note.text)  # outside the vault: literal wikilink
 
+    def test_double_bracket_suggests_only_names_from_the_edited_notes_vault(self) -> None:
+        self.set_vault(str(self.vault))
+        (self.vault / "notes" / "Beta.md").write_text("# Another Beta\n", encoding="utf-8")
+        note = self.vault / "notes" / "Alpha.md"
+        page = self.client.get("/view", params={"src": str(note), "folder": str(self.vault)})
+        cap = re.search(r'name="askw-doc-token" content="([^"]+)"', page.text).group(1)
+        edit = self.client.get("/api/source", params={"src": str(note.resolve()), "cap": cap}).json()["edit"]
+
+        def suggest(q: str, key: str = edit):
+            return self.client.get("/api/source/notes", params={"edit": key, "q": q})
+
+        self.assertEqual(suggest("al", "forged").status_code, 403)
+        # Names and where they sit, never text; a name two notes share links by its path.
+        betas = suggest("bet").json()["notes"]
+        self.assertEqual({(n["name"], n["link"]) for n in betas}, {("Beta", "Beta"), ("Beta", "notes/Beta")})
+        self.assertEqual(set(betas[0]), {"name", "folder", "link"})
+        self.assertEqual([n["link"] for n in suggest("alp").json()["notes"]], ["Alpha"])
+        # Nothing typed yet: the vault's notes, shallowest first; nothing hidden.
+        everything = [n["link"] for n in suggest("").json()["notes"]]
+        self.assertEqual(everything[0], "Beta")
+        self.assertNotIn("workspace", " ".join(everything))
+        # A note outside any vault has nothing to suggest.
+        loose_note = self.outside.resolve() / "M.md"
+        loose_page = self.client.get("/view", params={"src": str(loose_note)})
+        loose_cap = re.search(r'name="askw-doc-token" content="([^"]+)"', loose_page.text).group(1)
+        loose = self.client.get("/api/source", params={"src": str(loose_note.resolve()), "cap": loose_cap}).json()
+        self.assertEqual(suggest("a", loose["edit"]).json()["notes"], [])
+
     def test_a_note_edited_through_a_linked_folder_saves_to_its_real_file_and_follows_its_links(self) -> None:
         self.set_vault(str(self.vault))
         note = self.vault / "linked" / "L.md"
