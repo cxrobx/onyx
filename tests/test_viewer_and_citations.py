@@ -192,6 +192,19 @@ class ViewerAndCitationTests(unittest.TestCase):
             with self.assertRaises(SourceConflict):
                 set_task(path, 4, False, base="stale")
 
+    def test_the_editor_draws_callouts_with_the_pages_icons(self) -> None:
+        # editor/src/callouts.ts carries a copy of the page's callout icons and aliases, so ⌘E draws a callout's title
+        # as the page does; a change to one side alone fails here.
+        import json, re
+        from onyx import viewer
+
+        source = (Path(__file__).resolve().parents[1] / "editor" / "src" / "callouts.ts").read_text(encoding="utf-8")
+        aliases = json.loads(re.search(r"CALLOUT_ALIASES: Record<string, string> = (\{.*?\});", source).group(1))
+        self.assertEqual(aliases, viewer._CALLOUT_ALIASES)
+        block = re.search(r"CALLOUT_ICONS: Record<string, string> = \{\n(.*?)\n\};", source, re.S).group(1)
+        icons = dict(json.loads("{" + block.rstrip(",") + "}").items())
+        self.assertEqual(icons, viewer._CALLOUT_ICONS)
+
     def test_notes_render_obsidians_callouts_comments_tags_bare_urls_and_line_breaks(self) -> None:
         with tempfile.TemporaryDirectory() as raw:
             vault = Path(raw) / "vault"

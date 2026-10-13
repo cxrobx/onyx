@@ -3471,11 +3471,87 @@ class BrowserSmokeTests(unittest.TestCase):
                     browser.close()
         self.assertEqual(page_errors, [])
 
+    def test_a_selection_in_the_editor_gets_a_formatting_bar_above_and_the_ask_button_below(self) -> None:
+        # As Obsidian's editing toolbar: a selection made in ⌘E's editor shows a formatting bar above it, and its buttons
+        # format the note. The ask button stays below the selection, never in the bar's row, and right-click still
+        # opens the ask menu (and puts the bar away). Both engines.
+        note = self.root / "toolbar.md"
+        shots = os.environ.get("ONYX_SMOKE_SHOTS")
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    note.write_text("# Toolbar\n\nSome words to format here.\n\nA second line.\n", encoding="utf-8")
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 1200, "height": 760})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    reader = page.frame(name="reader")
+                    frame.locator("main h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    bar = frame.locator(".askw-ed-toolbar")
+                    expect(bar).to_be_hidden()
+
+                    # Drag across "words": the bar above the selection, the ask button below it.
+                    line = frame.locator(".cm-line", has_text="Some words")
+                    word = reader.evaluate("""() => {
+                      const line = [...document.querySelectorAll('.cm-line')].find(l => l.textContent.startsWith('Some words'));
+                      const text = line.firstChild, r = document.createRange();
+                      r.setStart(text, 5); r.setEnd(text, 10);
+                      const b = r.getBoundingClientRect(), f = document.defaultView.frameElement.getBoundingClientRect();
+                      return {x0: f.left + b.left + 1, x1: f.left + b.right - 1, y: f.top + b.top + b.height / 2, top: b.top, bottom: b.bottom};
+                    }""")
+                    page.mouse.move(word["x0"], word["y"])
+                    page.mouse.down()
+                    page.mouse.move(word["x1"], word["y"], steps=5)
+                    page.mouse.up()
+                    expect(bar).to_be_visible()
+                    trigger = frame.locator(".askw-trigger")
+                    expect(trigger).to_be_visible()
+                    bar_box, trigger_box = bar.bounding_box(), trigger.bounding_box()
+                    frame_top = page.locator("iframe[name=reader]").bounding_box()["y"]
+                    self.assertLess(bar_box["y"] + bar_box["height"], frame_top + word["top"], "the bar sits above the selection")
+                    self.assertGreater(trigger_box["y"], frame_top + word["bottom"] - 1, "the ask button sits below it")
+                    if shots:
+                        page.screenshot(path=f"{shots}/toolbar-{engine}.png")
+
+                    # Its buttons format the note: bold shows pressed once applied, and a second press takes it off.
+                    bar.locator("button[data-id=bold]").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some **words** to format here.")
+                    expect(bar.locator("button[data-id=bold]")).to_have_class(re.compile("is-on"))
+                    bar.locator("button[data-id=highlight]").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some **==words==** to format here.")
+                    bar.locator("button[data-id=clear]").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "Some words to format here.")
+                    bar.locator("button[data-id=heading]").click()
+                    frame.locator(".askw-ed-toolbar-menu button", has_text="Heading 2").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "## Some words to format here.")
+                    bar.locator("button[data-id=checklist]").click()
+                    self.assertEqual(reader.evaluate("askwEditor.text()").splitlines()[2], "- [ ] ## Some words to format here.")
+
+                    # Typing puts it away; right-click on a selection opens the ask menu, not the bar.
+                    page.keyboard.press("End")
+                    page.keyboard.type("!")
+                    expect(bar).to_be_hidden()
+                    reader.evaluate("""() => {
+                      const v = document.querySelector('.cm-content').cmTile.root.view, t = v.state.doc.toString(), i = t.indexOf('A second');
+                      v.dispatch({selection: {anchor: i, head: i + 8}}); v.focus();
+                    }""")
+                    expect(bar).to_be_visible()
+                    frame.locator(".cm-line", has_text="A second line").click(button="right", position={"x": 20, "y": 8})
+                    expect(bar).to_be_hidden()
+                    expect(frame.locator(".askw-menu")).to_be_visible()
+                    browser.close()
+        self.assertEqual(page_errors, [])
+
     def test_callouts_fold_on_the_page_and_wear_their_colour_while_editing(self) -> None:
         # Obsidian's `> [!type]` callouts: a coloured box on the page, `-` folded shut until its title is clicked, and the
         # same type's colour on the note's lines in the editor. Both engines.
         note = self.root / "callouts.md"
-        note.write_text("# Callouts\n\n> [!tip] A tip\n> Its body.\n\n> [!faq]- Folded\n> Inside the fold.\n", encoding="utf-8")
+        note.write_text("# Callouts\n\n> [!tip] A tip\n> Its body.\n\n> [!faq]- Folded\n> Inside the fold.\n\n> [!warning]\n> No title.\n",
+                        encoding="utf-8")
         shots = os.environ.get("ONYX_SMOKE_SHOTS")
         with sync_playwright() as playwright:
             for engine in ("chromium", "webkit"):
@@ -3494,9 +3570,21 @@ class BrowserSmokeTests(unittest.TestCase):
 
                     frame.locator("h1").click()
                     page.keyboard.press("Meta+e")
+                    # With the cursor elsewhere each reads as on the page: its `[!type]` drawn as an icon (and as the
+                    # type's name when it has no title), and a folded one's body hidden behind its chevron.
                     lines = frame.locator(".askw-ed .cm-line.askw-ed-callout")
-                    expect(lines).to_have_count(4)
-                    expect(frame.locator('.askw-ed .cm-line.askw-ed-callout-title[data-callout="tip"]')).to_have_count(1)
+                    expect(lines).to_have_count(5)
+                    tip_title = frame.locator('.askw-ed .cm-line.askw-ed-callout-title[data-callout="tip"]')
+                    expect(tip_title).to_have_text("A tip")
+                    expect(tip_title.locator(".askw-ed-callout-icon svg")).to_have_count(1)
+                    expect(frame.locator('.askw-ed .cm-line.askw-ed-callout-title[data-callout="warning"]')).to_have_text("Warning")
+                    expect(frame.locator(".askw-ed .cm-line", has_text="Inside the fold.")).to_be_hidden()
+                    faq_title = frame.locator('.askw-ed .cm-line.askw-ed-callout-title[data-callout="faq"]')
+                    expect(faq_title.locator(".askw-ed-callout-fold")).to_have_count(1)
+                    # The cursor in it: its source, and its body.
+                    faq_title.click()
+                    expect(faq_title).to_contain_text("[!faq]-")
+                    expect(frame.locator(".askw-ed .cm-line", has_text="Inside the fold.")).to_be_visible()
                     colour = frame.locator('.askw-ed .cm-line.askw-ed-callout[data-callout="tip"]').first.evaluate(
                         "e => getComputedStyle(e).backgroundColor")
                     self.assertEqual(colour, tip.evaluate("e => getComputedStyle(e).backgroundColor"))

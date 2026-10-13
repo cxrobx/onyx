@@ -11,6 +11,8 @@ import { Decoration, DecorationSet, EditorView, ViewPlugin, ViewUpdate, WidgetTy
 import type { SyntaxNode } from "@lezer/common";
 import type { DelimiterType, MarkdownConfig } from "@lezer/markdown";
 
+import { calloutIcon, calloutTitle } from "./callouts";
+
 // `[[Note]]`, `[[Note|Alias]]`, `[[Note#Heading]]` and `![[embed]]`, with the reader's limits: one line, not empty, no
 // nested `[[`. Parsed before Link, as the reader does, so a wikilink is never taken for a reference link.
 export const wikilinks: MarkdownConfig = {
@@ -197,6 +199,38 @@ class TaskBox extends WidgetType {
   ignoreEvent() { return true; }
 }
 
+// A callout's `[!type]`, drawn as the reading page draws its title (viewer.py): the type's icon, and its name when the
+// callout has no title of its own. A click puts the cursor there, which shows the source.
+const SVG = (paths: string) =>
+  `<svg viewBox="0 0 24 24" width="1em" height="1em" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${paths}</svg>`;
+class CalloutHead extends WidgetType {
+  constructor(readonly type: string, readonly title: string) { super(); }
+  eq(other: CalloutHead) { return other.type === this.type && other.title === this.title; }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "askw-ed-callout-head";
+    const icon = document.createElement("span");
+    icon.className = "askw-ed-callout-icon";
+    icon.setAttribute("aria-hidden", "true");
+    icon.innerHTML = SVG(calloutIcon(this.type));  // fixed markup from callouts.ts, never the note's text
+    el.append(icon);
+    if (this.title) el.append(this.title);
+    return el;
+  }
+}
+// The chevron after a foldable callout's title: pointing right while it is folded, down while open.
+class CalloutFold extends WidgetType {
+  constructor(readonly open: boolean) { super(); }
+  eq(other: CalloutFold) { return other.open === this.open; }
+  toDOM() {
+    const el = document.createElement("span");
+    el.className = "askw-ed-callout-fold" + (this.open ? " is-open" : "");
+    el.setAttribute("aria-hidden", "true");
+    el.innerHTML = SVG('<path d="m9 18 6-6-6-6"/>');
+    return el;
+  }
+}
+
 // An image drawn in place of its `![](…)`. A click puts the cursor on it, which shows the syntax to edit.
 class Picture extends WidgetType {
   constructor(readonly url: string, readonly alt: string, readonly at: number, readonly width: number) { super(); }
@@ -351,6 +385,7 @@ function build(view: EditorView): DecorationSet {
     else out.push(cls("askw-ed-embed").range(node.from, node.to));
   };
   const seen = new Set<number>();  // a block reached from two visible ranges is decorated once
+  const drawnHeads = new Set<number>();  // callout markers drawn as a title, which the Link case leaves alone
 
   for (const { from, to } of view.visibleRanges) {
     syntaxTree(state).iterate({
@@ -389,7 +424,9 @@ function build(view: EditorView): DecorationSet {
         }
         switch (name) {
           case "Link": {
-            // A callout's `[!type]` reads as a shortcut reference link; it is the callout's marker, muted like `>`.
+            // A callout's `[!type]` reads as a shortcut reference link; it is the callout's marker, muted like `>` while
+            // the cursor is in its callout (otherwise the Blockquote case has drawn it as the title).
+            if (drawnHeads.has(node.from)) return false;
             if (/^\[![^\]\n]+\]$/.test(doc.sliceString(node.from, node.to))
               && /^\s*>[\s>]*$/.test(doc.sliceString(doc.lineAt(node.from).from, node.from))) {
               const fold = /[+-]/.test(doc.sliceString(node.to, node.to + 1)) ? 1 : 0;
@@ -470,8 +507,21 @@ function build(view: EditorView): DecorationSet {
             const callout = /^\s*>\s?\[!([^\]\n]+)\]/.exec(doc.lineAt(node.from).text);
             if (!callout) { lines(node.from, node.to, "askw-ed-quote"); return; }
             const type = callout[1].trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "-");
-            for (let n = doc.lineAt(node.from).number, last = lastLine(node.from, node.to); n <= last; n++) {
-              const edge = (n === doc.lineAt(node.from).number ? " askw-ed-callout-title" : "") + (n === last ? " askw-ed-callout-last" : "");
+            // With the cursor outside it, the callout reads as on the page: its marker drawn as its title, and the body
+            // of one folded shut (`[!type]-`) hidden. With the cursor in it, its source.
+            const head = doc.lineAt(node.from), shown = touches(node.from, node.to);
+            const parts = /^(\s*>\s?)\[!([^\]\n]+)\]([+-]?)([ \t]*)(.*)$/.exec(head.text);
+            const fold = parts ? parts[3] : "", shut = !shown && fold === "-";
+            if (!shown && parts) {
+              const from = head.from + parts[1].length, to = from + parts[2].length + 3 + fold.length + parts[4].length;
+              drawnHeads.add(from);
+              out.push(Decoration.replace({ widget: new CalloutHead(parts[2], parts[5].trim() ? "" : calloutTitle(parts[2])) }).range(from, to));
+              if (fold) out.push(Decoration.widget({ widget: new CalloutFold(fold === "+"), side: 1 }).range(head.to));
+            }
+            for (let n = head.number, last = lastLine(node.from, node.to); n <= last; n++) {
+              const title = n === head.number;
+              if (shut && !title) { out.push(Decoration.line({ class: "askw-ed-callout-folded" }).range(doc.line(n).from)); continue; }
+              const edge = (title ? " askw-ed-callout-title" : "") + (n === last || (shut && title) ? " askw-ed-callout-last" : "");
               out.push(Decoration.line({ class: "askw-ed-callout" + edge, attributes: { "data-callout": type } }).range(doc.line(n).from));
             }
             return;

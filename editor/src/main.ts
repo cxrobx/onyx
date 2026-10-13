@@ -18,6 +18,7 @@ import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged
 import { htmlPaste } from "./paste";
 import { CSS } from "./style";
 import { suggesters } from "./suggest";
+import { toolbar } from "./toolbar";
 import { typing } from "./typing";
 
 /**
@@ -326,6 +327,7 @@ export async function open(options: OpenOptions): Promise<Session> {
         }),
         typing,
         htmlPaste,
+        toolbar,
         keymap.of(historyKeymap),
         EditorView.contentAttributes.of({ spellcheck: "true", autocorrect: "on", autocapitalize: "sentences" }),
         EditorView.updateListener.of((u) => {

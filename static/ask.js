@@ -786,6 +786,13 @@
     var left = rect.left + rect.width / 2 - width / 2;
     var top = rect.bottom + 7;
     if (top + height > window.innerHeight - 8) top = rect.top - height - 7;
+    // The ⌘E editor's formatting bar sits above a selection (editor/src/toolbar.ts); where it had no room there and
+    // went below, the button goes under it, so the two never share a row.
+    var bar = document.querySelector('.askw-ed-toolbar:not([hidden])');
+    if (bar) {
+      var b = bar.getBoundingClientRect();
+      if (top < b.bottom + 4 && top + height > b.top - 4) top = b.bottom + 7;
+    }
     triggerEl.style.left = Math.max(8, Math.min(left, window.innerWidth - width - 8)) + 'px';
     triggerEl.style.top = Math.max(8, top) + 'px';
   }

@@ -44,26 +44,63 @@ function split(text: string): { quote: string; indent: string; marker: string; b
   const quote = /^(?:\s*>\s?)*/.exec(quoteAndIndent)![0];
   return { quote, indent: quoteAndIndent.slice(quote.length), marker: m[2] ?? "", box: m[4], rest: text.slice(m[0].length) };
 }
-const heading = (level: number) => eachLine((text) => {
+export const heading = (level: number) => eachLine((text) => {
   const [, quote, rest] = /^(\s*(?:>\s?)*)(?:#{1,6}[ \t]+)?(.*)$/.exec(text)!;
   return quote + (level ? "#".repeat(level) + " " : "") + rest;
 });
-const bulletList = eachLine((text) => {
+export const bulletList = eachLine((text) => {
   const p = split(text);
   if (p.marker && /[-*+]/.test(p.marker) && p.box === undefined) return p.quote + p.indent + p.rest;
   return p.quote + p.indent + "- " + p.rest;
 });
-const numberedList = eachLine((text, i) => {
+export const numberedList = eachLine((text, i) => {
   const p = split(text);
   if (/^\d/.test(p.marker)) return p.quote + p.indent + p.rest;
   return p.quote + p.indent + `${i + 1}. ` + p.rest;
 });
-const checklist = eachLine((text) => {
+export const checklist = eachLine((text) => {
   const p = split(text);
   if (p.box !== undefined) return p.quote + p.indent + p.rest;
   return p.quote + p.indent + "- [ ] " + p.rest;
 });
-const blockquote = eachLine((text) => (/^\s*>\s?/.test(text) ? text.replace(/^(\s*)>\s?/, "$1") : "> " + text));
+export const blockquote = eachLine((text) => (/^\s*>\s?/.test(text) ? text.replace(/^(\s*)>\s?/, "$1") : "> " + text));
+
+// The selected lines inside a fenced code block, or a new empty one at the cursor.
+export const codeBlock: StateCommand = (target) => {
+  const { state, dispatch } = target, range = state.selection.main;
+  if (range.empty) return block("```{cursor}\n\n```")(target);
+  const first = state.doc.lineAt(range.from), last = state.doc.lineAt(range.to);
+  dispatch(state.update({
+    changes: [{ from: first.from, insert: "```" + state.lineBreak }, { from: last.to, insert: state.lineBreak + "```" }],
+    selection: { anchor: first.from + 3 },
+    userEvent: "input",
+    scrollIntoView: true,
+  }));
+  return true;
+};
+
+// The inline formatting the selection takes in, its marks taken out: emphasis, bold, code, strikethrough, highlight,
+// whole spans whose marks sit just outside the selection included.
+const SPANS = /^(Emphasis|StrongEmphasis|InlineCode|Strikethrough|Highlight)$/;
+const SPAN_MARKS = /^(EmphasisMark|CodeMark|StrikethroughMark|HighlightMark)$/;
+export const clearFormatting: StateCommand = ({ state, dispatch }) => {
+  const changes: { from: number; to: number }[] = [], seen = new Set<number>();
+  for (const range of state.selection.ranges) {
+    if (range.empty) continue;
+    syntaxTree(state).iterate({
+      from: range.from, to: range.to,
+      enter(node) {
+        if (!SPANS.test(node.name) || node.to <= range.from || node.from >= range.to) return;
+        for (let mark = node.node.firstChild; mark; mark = mark.nextSibling) {
+          if (SPAN_MARKS.test(mark.name) && !seen.has(mark.from)) { seen.add(mark.from); changes.push({ from: mark.from, to: mark.to }); }
+        }
+      },
+    });
+  }
+  if (!changes.length) return false;
+  dispatch(state.update({ changes, userEvent: "delete", scrollIntoView: true }));
+  return true;
+};
 
 // Put a block in at the cursor, on lines of its own; `{cursor}` marks where the cursor goes.
 function block(template: string): StateCommand {
