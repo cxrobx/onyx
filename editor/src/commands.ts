@@ -153,7 +153,7 @@ const COMMANDS: SlashCommand[] = [
   { name: "Insert current time", run: insertText(now) },
 ];
 
-export async function slashSource(context: CompletionContext): Promise<CompletionResult | null> {
+export function slashSource(context: CompletionContext): CompletionResult | null {
   const typed = context.matchBefore(/(?:^|\s)\/[\p{L}\p{N}-]*$/u);
   if (!typed) return null;
   const slash = typed.from + typed.text.indexOf("/");

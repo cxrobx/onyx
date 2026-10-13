@@ -304,7 +304,7 @@ export async function open(options: OpenOptions): Promise<Session> {
   // What the suggesters ask the server for (suggest.ts), through this note's edit capability; nothing when it can't say.
   function lookup(route: string, params: Record<string, string>, key: string) {
     return fetch(`${server}/api/source/${route}?${new URLSearchParams({ edit, ...params })}`, { cache: "no-store" })
-      .then((r) => r.json()).then((d) => (d.ok ? d[key] : [])).catch(() => []);
+      .then((r) => r.json()).then((d) => (d.ok && Array.isArray(d[key]) ? d[key] : [])).catch(() => []);
   }
 
   const view = new EditorView({

@@ -1072,7 +1072,9 @@ def create_app(config: AppConfig) -> FastAPI:
     @app.get("/api/source/notes")
     async def note_suggestions(request: Request, edit: str, q: str = ""):
         """The notes a ``[[`` typed in the editor can link to: names in the edited note's own vault, nothing else, and
-        never their text. ``link`` is what goes between the brackets, the bare name unless another note shares it."""
+        never their text. ``link`` is what goes between the brackets, the bare name unless another note shares it.
+        With nothing typed, every note (the editor asks once and narrows as the name is typed, so Enter never meets a
+        list still on its way); with a query, the best 30."""
         if denied := api_forbidden(request):
             return denied
         opened = editing(edit)
@@ -1090,7 +1092,7 @@ def create_app(config: AppConfig) -> FastAPI:
                 if item.kind != "note" or item.missing:
                     continue
                 out.append({"name": os.path.splitext(item.name)[0], "folder": item.folder, "link": index.link_target(item)})
-                if len(out) == 30:
+                if len(out) == (30 if q.strip() else 5000):
                     break
             return out
 

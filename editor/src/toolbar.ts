@@ -161,6 +161,10 @@ export const toolbar = ViewPlugin.fromClass(class {
     const { view } = this;
     if (!view.hasFocus || view.state.selection.main.empty || this.pressed) return;
     this.shown = true;
+    // In the note's own colours, read off its page by ask.js (`askwNoteColours`), as the ask button below it is.
+    const tone = window.askwNoteColours?.() ?? null;
+    this.bar.style.setProperty("--askw-bar-bg", tone ? tone.bg : "");
+    this.bar.style.setProperty("--askw-bar-ink", tone ? tone.ink : "");
     this.bar.hidden = false;
     this.place();
   }
@@ -212,3 +216,7 @@ export const toolbar = ViewPlugin.fromClass(class {
     this.bar.remove();
   }
 });
+
+declare global {
+  interface Window { askwNoteColours?: () => { bg: string; ink: string } | null }
+}

@@ -61,68 +61,89 @@ function inCode(state: EditorState, pos: number): boolean {
   return false;
 }
 
-export function suggesters(lookups: Lookups): Extension {
-  // Asked for as the editor opens: the first walk of a big vault takes a second, and the first `#` shouldn't wait it out.
-  const tagList = lookups.tags().catch(() => [] as TagCount[]);
+// A list the editor asks for once, as it opens, and answers from from then on. A source that answers at once leaves
+// no moment with the list closed: one that waits on the server for each keystroke closes it while it waits, and an
+// Enter typed then is a new line instead of the pick.
+interface Loaded<T> { ready: T | null; promise: Promise<T> }
+function load<T>(asked: Promise<T>, empty: T): Loaded<T> {
+  const loaded: Loaded<T> = { ready: null, promise: asked.catch(() => empty) };
+  loaded.promise.then((value) => { loaded.ready = value; });
+  return loaded;
+}
+const whenLoaded = <T, R>(l: Loaded<T>, use: (value: T) => R): R | Promise<R> => (l.ready !== null ? use(l.ready) : l.promise.then(use));
 
+export function suggesters(lookups: Lookups): Extension {
+  // Asked for as the editor opens: the first walk of a big vault takes a second, and the first `[[` or `#` shouldn't
+  // wait it out. Every note's name (the route sends all of them when nothing is typed) and every tag.
+  const noteList = load(lookups.notes(""), [] as NoteName[]);
+  const tagList = load(lookups.tags(), [] as TagCount[]);
   // A note's headings, asked for once per name while the editor is open.
-  const headingCache = new Map<string, Promise<Heading[]>>();
-  function headingsOf(note: string): Promise<Heading[]> {
+  const headingCache = new Map<string, Loaded<Heading[]>>();
+  function headingsOf(note: string): Loaded<Heading[]> {
     const key = note.trim().toLowerCase();
-    if (!headingCache.has(key)) headingCache.set(key, lookups.headings(note).catch(() => []));
+    if (!headingCache.has(key)) headingCache.set(key, load(lookups.headings(note), []));
     return headingCache.get(key)!;
   }
 
-  async function headingsSource(context: CompletionContext): Promise<CompletionResult | null> {
+  function headingsSource(context: CompletionContext) {
     const typed = context.matchBefore(/\[\[[^[\]|#^\n]*#[^[\]|#^\n]*$/);
     if (!typed) return null;
     const hash = typed.text.indexOf("#"), note = typed.text.slice(2, hash);
-    const all = note.trim() ? await headingsOf(note) : ownHeadings(context.state);
-    const list = narrow(all, typed.text.slice(hash + 1), (h) => h.text);
-    if (context.aborted || !list.length) return null;
-    return {
-      from: typed.from + hash + 1,
-      filter: false,
-      // The note's name, as typed, and the heading go in together.
-      options: list.map((h) => ({ label: linkText(h.text), detail: "H" + h.level, apply: intoLink(note + "#" + linkText(h.text), typed.from + 2) })),
+    const answer = (all: Heading[]): CompletionResult | null => {
+      const list = narrow(all, typed.text.slice(hash + 1), (h) => h.text);
+      if (!list.length) return null;
+      return {
+        from: typed.from + hash + 1,
+        filter: false,
+        // The note's name, as typed, and the heading go in together.
+        options: list.map((h) => ({ label: linkText(h.text), detail: "H" + h.level, apply: intoLink(note + "#" + linkText(h.text), typed.from + 2) })),
+      };
     };
+    return note.trim() ? whenLoaded(headingsOf(note), answer) : answer(ownHeadings(context.state));
   }
 
-  async function notesSource(context: CompletionContext): Promise<CompletionResult | null> {
+  function notesSource(context: CompletionContext) {
     const typed = context.matchBefore(/\[\[[^[\]|#^\n]*$/);
     if (!typed) return null;
-    const notes = await lookups.notes(typed.text.slice(2));
-    if (context.aborted || !notes.length) return null;
-    return {
-      from: typed.from + 2,
-      filter: false,  // the server has matched them already
-      options: notes.map((note) => ({ label: note.link, displayLabel: note.name, detail: note.folder, apply: intoLink(note.link) })),
-    };
+    const query = typed.text.slice(2);
+    return whenLoaded(noteList, (all): CompletionResult | null => {
+      // By name first; then by path, for a name typed with its folder.
+      const byName = narrow(all, query, (n) => n.name), seen = new Set(byName);
+      const notes = [...byName, ...narrow(all, query, (n) => n.link).filter((n) => !seen.has(n))].slice(0, 30);
+      if (!notes.length) return null;
+      return {
+        from: typed.from + 2,
+        filter: false,
+        options: notes.map((note) => ({ label: note.link, displayLabel: note.name, detail: note.folder, apply: intoLink(note.link) })),
+      };
+    });
   }
 
-  async function tagsSource(context: CompletionContext): Promise<CompletionResult | null> {
+  function tagsSource(context: CompletionContext) {
     const typed = context.matchBefore(/(?:^|[\s(])#[\p{L}\p{N}_/-]*$/u);
     if (!typed) return null;
     const hash = typed.from + typed.text.indexOf("#");
     if (inCode(context.state, hash)) return null;
-    const tags = narrow(await tagList, typed.text.slice(typed.text.indexOf("#") + 1), (t) => t.tag).slice(0, 50);
-    if (context.aborted || !tags.length) return null;
-    return {
-      from: hash + 1,
-      filter: false,  // narrowed above, the most used first among equal matches
-      options: tags.map((t) => ({
-        label: t.tag,
-        detail: String(t.count),
-        apply: (view: EditorView, _c: Completion, from: number, to: number) => {
-          const spaced = /\s/.test(view.state.sliceDoc(to, to + 1));
-          view.dispatch({
-            changes: { from, to, insert: spaced ? t.tag : t.tag + " " },
-            selection: { anchor: from + t.tag.length + 1 },
-            userEvent: "input.complete",
-          });
-        },
-      })),
-    };
+    return whenLoaded(tagList, (all): CompletionResult | null => {
+      const tags = narrow(all, typed.text.slice(typed.text.indexOf("#") + 1), (t) => t.tag).slice(0, 50);
+      if (!tags.length) return null;
+      return {
+        from: hash + 1,
+        filter: false,  // narrowed above, the most used first among equal matches
+        options: tags.map((t) => ({
+          label: t.tag,
+          detail: String(t.count),
+          apply: (view: EditorView, _c: Completion, from: number, to: number) => {
+            const spaced = /\s/.test(view.state.sliceDoc(to, to + 1));
+            view.dispatch({
+              changes: { from, to, insert: spaced ? t.tag : t.tag + " " },
+              selection: { anchor: from + t.tag.length + 1 },
+              userEvent: "input.complete",
+            });
+          },
+        })),
+      };
+    });
   }
 
   return [

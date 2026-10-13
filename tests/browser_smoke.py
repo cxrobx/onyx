@@ -3494,6 +3494,10 @@ class BrowserSmokeTests(unittest.TestCase):
                     bar = frame.locator(".askw-ed-toolbar")
                     expect(bar).to_be_hidden()
 
+                    # A themed note, as a vault's look paints one: a solid ground and its own ink.
+                    reader.evaluate("""() => { document.body.style.background = 'rgb(253, 246, 227)';
+                      document.querySelector('main').style.background = 'transparent';
+                      document.querySelector('main').style.color = 'rgb(0, 43, 54)'; }""")
                     # Drag across "words": the bar above the selection, the ask button below it.
                     line = frame.locator(".cm-line", has_text="Some words")
                     word = reader.evaluate("""() => {
@@ -3514,6 +3518,11 @@ class BrowserSmokeTests(unittest.TestCase):
                     frame_top = page.locator("iframe[name=reader]").bounding_box()["y"]
                     self.assertLess(bar_box["y"] + bar_box["height"], frame_top + word["top"], "the bar sits above the selection")
                     self.assertGreater(trigger_box["y"], frame_top + word["bottom"] - 1, "the ask button sits below it")
+                    # Both in the note's own colours.
+                    page_bg, page_ink = "rgb(253, 246, 227)", "rgb(0, 43, 54)"
+                    for chrome in (bar, trigger):
+                        self.assertEqual(chrome.evaluate("e => getComputedStyle(e).backgroundColor"), page_bg)
+                        self.assertEqual(chrome.evaluate("e => getComputedStyle(e).color"), page_ink)
                     if shots:
                         page.screenshot(path=f"{shots}/toolbar-{engine}.png")
 

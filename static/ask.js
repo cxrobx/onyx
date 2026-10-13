@@ -77,6 +77,7 @@
     '.askw-menu{position:fixed;z-index:2147483600;display:none;min-width:190px;background:rgba(255,255,255,.82);border:1px solid var(--askw-line);border-radius:11px;box-shadow:0 20px 55px rgba(0,0,0,.18),inset 0 1px 0 rgba(255,255,255,.65);backdrop-filter:blur(24px) saturate(1.35);-webkit-backdrop-filter:blur(24px) saturate(1.35);padding:6px;font-size:13px;cursor:move;}',
     '.askw-trigger{position:fixed;z-index:2147483598;display:none;align-items:center;gap:5px;padding:5px 10px;border:1px solid rgba(255,255,255,.28);border-radius:999px;background:var(--askw-accent);color:#fff;box-shadow:0 10px 28px rgba(0,0,0,.20);font:600 12px/1.4 -apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;cursor:pointer;}',
     '.askw-trigger:hover{background:var(--askw-accent-hover);}',
+    '.askw-trigger.askw-toned:hover{box-shadow:0 10px 28px rgba(0,0,0,.2),0 0 0 1px currentColor;}',
     '.askw-item{display:flex;width:100%;align-items:center;gap:8px;padding:8px 10px;border:0;border-radius:7px;background:transparent;font:inherit;text-align:left;cursor:pointer;color:#0d0d0d;user-select:none;}',
     '.askw-item:hover{background:rgba(13,13,13,.07);}',
     '.askw-trigger:focus-visible,.askw-item:focus-visible,.askw-pill:focus-visible,.askw-x:focus-visible,.askw-follow-go:focus-visible,.askw-foot button:focus-visible,.askw-ask-go:focus-visible,.askw-picker button:focus-visible{outline:2px solid var(--askw-accent);outline-offset:2px;}',
@@ -774,10 +775,41 @@
   }
 
   // ============================================================ menu
+  // The note's own colours, as its page paints them: the ground under its text, and the text. A vault's look, an
+  // artifact's own style and Onyx's default all paint the page differently, and the reader's variables follow none of
+  // them, so they are read off the page. None when the two don't hold 4.5:1 (a page whose colours can't be read off
+  // it): the button keeps its own look then. The ⌘E editor's formatting bar uses the same (editor/src/toolbar.ts).
+  function noteColours() {
+    var main = document.querySelector('main') || document.body;
+    if (!main) return null;
+    var parse = function (c) {
+      var m = /^rgba?\(([\d.]+),\s*([\d.]+),\s*([\d.]+)(?:,\s*([\d.]+))?\)$/.exec(c || '');
+      return m && (m[4] === undefined || +m[4] > 0.95) ? [+m[1], +m[2], +m[3]] : null;
+    };
+    var bg = null;
+    for (var el = main; el && !bg; el = el.parentElement) bg = parse(getComputedStyle(el).backgroundColor);
+    var ink = parse(getComputedStyle(main).color);
+    if (!bg || !ink) return null;
+    var lum = function (c) {
+      var v = c.map(function (x) { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); });
+      return 0.2126 * v[0] + 0.7152 * v[1] + 0.0722 * v[2];
+    };
+    var a = lum(bg), b = lum(ink);
+    if ((Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05) < 4.5) return null;
+    return { bg: bg.join(' '), ink: ink.join(' ') };
+  }
+  window.askwNoteColours = noteColours;
+
   function showTrigger(captured) {
     // Not beside the open menu either: moving the menu can end in a release over the page.
     if (!triggerEl || !captured || panelEl.classList.contains('open') || menuEl.style.display === 'block') return;
     sel = captured;
+    // In the note's own colours, so it reads as part of the page rather than as a badge over it.
+    var tone = noteColours();
+    triggerEl.style.background = tone ? 'rgb(' + tone.bg + ')' : '';
+    triggerEl.style.color = tone ? 'rgb(' + tone.ink + ')' : '';
+    triggerEl.style.borderColor = tone ? 'rgb(' + tone.ink + ' / .16)' : '';
+    triggerEl.classList.toggle('askw-toned', !!tone);
     triggerEl.style.display = 'flex';
     triggerEl.setAttribute('aria-hidden', 'false');
     var rect = captured.rect;
