@@ -1179,7 +1179,7 @@ def _reading_shell(title: str, body: str, *, kind: str) -> str:
     return f"""<!doctype html><html><head><meta charset=utf-8>
 <meta name=viewport content="width=device-width,initial-scale=1"><title>{_html.escape(title)}</title>
 <style>
-:root{{color-scheme:light dark;--reader-bg:247 247 247;--reader-pane:255 255 255;--reader-ink:38 36 33;--reader-muted:87 83 78;--reader-faint:168 162 158;--reader-line:0 0 0;--reader-code:243 242 239;--reader-accent:58 131 247}}
+:root{{color-scheme:light dark;--reader-bg:247 247 247;--reader-pane:255 255 255;--reader-ink:38 36 33;--reader-muted:87 83 78;--reader-faint:168 162 158;--reader-line:0 0 0;--reader-code:243 242 239;--reader-accent:212 59 53}}
 html,body{{min-height:100%;background:transparent}} body{{margin:0;background:rgb(var(--reader-bg)/.76);color:rgb(var(--reader-ink));font:17px/1.72 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;backdrop-filter:saturate(1.08)}}
 main{{position:relative;box-sizing:border-box;max-width:860px;min-height:100vh;margin:0 auto;padding:64px 72px 110px;background:rgb(var(--reader-pane)/.86);border-inline:1px solid rgb(var(--reader-line)/.09);box-shadow:0 18px 55px rgb(0 0 0/.06);backdrop-filter:blur(22px) saturate(1.16)}}
 h1,h2,h3{{line-height:1.2;letter-spacing:-.02em}} h1{{font-size:2.35rem}} h2{{margin-top:2.2em}}
@@ -1198,7 +1198,7 @@ mark{{padding:0 .1em;border-radius:3px;background:rgb(255 208 0/.4);color:inheri
 .askw-wikilink-missing{{border-bottom:1px dotted rgb(var(--reader-faint));color:rgb(var(--reader-muted));cursor:help}} a.askw-embed{{display:inline-block;padding:1px 8px;border:1px dashed rgb(var(--reader-line)/.25);border-radius:6px;text-decoration:none}} a.askw-embed::before{{content:"⧉ ";opacity:.6}}
 {_CALLOUT_CSS}
 sup.footnote-ref{{line-height:0}} sup.footnote-ref a{{padding:0 .15em;text-decoration:none}} .footnotes{{margin-top:2.5em;color:rgb(var(--reader-muted));font-size:.9em}} .footnotes hr{{margin:0 0 1em}} .footnote-backref{{text-decoration:none}}
-@media(prefers-color-scheme:dark){{:root{{--reader-bg:24 24 24;--reader-pane:31 31 31;--reader-ink:245 245 245;--reader-muted:205 205 205;--reader-faint:143 143 143;--reader-line:255 255 255;--reader-code:48 48 48}} body{{background:rgb(var(--reader-bg)/.70)}} main{{background:rgb(var(--reader-pane)/.78);box-shadow:0 18px 60px rgb(0 0 0/.28)}}}}
+@media(prefers-color-scheme:dark){{:root{{--reader-accent:241 107 101;--reader-bg:24 24 24;--reader-pane:31 31 31;--reader-ink:245 245 245;--reader-muted:205 205 205;--reader-faint:143 143 143;--reader-line:255 255 255;--reader-code:48 48 48}} body{{background:rgb(var(--reader-bg)/.70)}} main{{background:rgb(var(--reader-pane)/.78);box-shadow:0 18px 60px rgb(0 0 0/.28)}}}}
 @media(max-width:720px){{main{{padding:36px 24px}}}}
 @media(prefers-reduced-transparency:reduce){{body,main,.askw-pdf-page{{backdrop-filter:none}} body{{background:rgb(var(--reader-bg))}} main{{background:rgb(var(--reader-pane))}}}}
 </style></head><body data-askw-document-kind="{kind}"><main>{body}</main></body></html>"""

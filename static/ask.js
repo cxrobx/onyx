@@ -68,7 +68,7 @@
 
   // ============================================================ styles
   var CSS = [
-    '.askw-root{all:revert;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",sans-serif;color:#0d0d0d;line-height:1.5;-webkit-font-smoothing:antialiased;--askw-accent:#3a83f7;--askw-accent-hover:#2c67c5;--askw-line:rgba(0,0,0,.10);--askw-soft:rgba(0,0,0,.055);}',
+    '.askw-root{all:revert;box-sizing:border-box;font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Helvetica Neue",sans-serif;color:#0d0d0d;line-height:1.5;-webkit-font-smoothing:antialiased;--askw-accent:#d43b35;--askw-accent-hover:#b72e29;--askw-line:rgba(0,0,0,.10);--askw-soft:rgba(0,0,0,.055);}',
     '.askw-root *{box-sizing:border-box;}',
     // A page's own text styles reach in here: one that inks its strong, code or td
     // (the HTML Artifact Kit's do) would ink them in the panel too, dark on a dark
@@ -86,7 +86,7 @@
     '.askw-ask-wrap.open{display:block;}',
     // Its own cursor, not the menu's move: cursor is inherited.
     '.askw-ask-input{cursor:auto;width:100%;min-height:54px;resize:vertical;border:1px solid var(--askw-line);border-radius:7px;background:#fff;padding:7px 9px;font:inherit;font-size:13px;color:#0d0d0d;outline:none;}',
-    '.askw-ask-input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(58,131,247,.18);}',
+    '.askw-ask-input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(212,59,53,.18);}',
     '.askw-ask-go{margin-top:6px;float:right;background:var(--askw-accent);color:#fff;border:none;border-radius:7px;padding:6px 14px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;}',
     '.askw-ask-go:disabled{opacity:.45;cursor:not-allowed;}',
     '.askw-panel{position:fixed;z-index:2147483601;display:none;width:' + PANEL_W + 'px;height:auto;min-width:300px;min-height:180px;max-width:96vw;max-height:92vh;background:rgba(252,252,252,.88);border:1px solid var(--askw-line);border-radius:15px;box-shadow:0 26px 70px rgba(0,0,0,.22),inset 0 1px 0 rgba(255,255,255,.72);backdrop-filter:blur(28px) saturate(1.28);-webkit-backdrop-filter:blur(28px) saturate(1.28);overflow:hidden;flex-direction:column;resize:both;}',
@@ -98,7 +98,7 @@
     '.askw-x{position:absolute;top:9px;right:9px;width:26px;height:26px;border:none;background:transparent;color:#a8a29e;font-size:17px;line-height:1;border-radius:6px;cursor:pointer;}',
     '.askw-x:hover{background:rgba(13,13,13,.07);color:#0d0d0d;}',
     '.askw-tools{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0 0;}.askw-tools:empty{display:none;}',
-    '.askw-pillt{display:inline-flex;align-items:center;gap:5px;background:rgba(58,131,247,.11);color:#2c67c5;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:999px;}',
+    '.askw-pillt{display:inline-flex;align-items:center;gap:5px;background:rgba(212,59,53,.11);color:#b72e29;font-size:10.5px;font-weight:600;padding:3px 9px;border-radius:999px;}',
     '.askw-dot{width:6px;height:6px;border-radius:50%;background:var(--askw-accent);animation:askw-pulse 1.1s infinite;}',
     '@keyframes askw-pulse{0%,100%{opacity:.35}50%{opacity:1}}',
     '.askw-body{padding:12px 15px 15px;overflow-y:auto;overscroll-behavior:contain;font-size:14px;line-height:1.55;color:#0d0d0d;flex:1 1 auto;min-height:0;}',
@@ -120,12 +120,12 @@
     '.askw-think{display:flex;align-items:center;gap:8px;color:#78716c;font-size:13px;}',
     '.askw-err{color:#b91c1c;font-size:13px;}',
     '.askw-request-meta{color:#a8a29e;font-size:10px;margin:6px 0 0;}',
-    '.askw-origin{margin:8px 0;padding:6px 9px;border-radius:7px;background:rgba(58,131,247,.09);color:#2c67c5;font-size:10.5px;font-weight:600;}',
+    '.askw-origin{margin:8px 0;padding:6px 9px;border-radius:7px;background:rgba(212,59,53,.09);color:#b72e29;font-size:10.5px;font-weight:600;}',
     '.askw-history-entry{margin:0 0 13px;padding:11px;border:1px solid var(--askw-line);border-radius:10px;background:rgba(255,255,255,.28);}',
     '.askw-history-entry .askw-q{margin-top:0}.askw-history-meta{margin:8px 0 0;color:#a8a29e;font-size:10px}.askw-history-actions{display:flex;gap:6px;flex-wrap:wrap;margin-top:9px}.askw-history-actions button{border:1px solid var(--askw-line);border-radius:7px;background:rgba(255,255,255,.76);color:#5d5d5d;padding:5px 8px;font:inherit;font-size:10.5px;cursor:pointer}.askw-history-actions button:first-child{background:var(--askw-accent);border-color:var(--askw-accent);color:#fff}',
     '.askw-citations{margin:14px 0 2px;padding-top:10px;border-top:1px solid var(--askw-soft);}',
     '.askw-citations-title{margin:0 0 7px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#78716c;}',
-    '.askw-citation{display:block;width:100%;margin:5px 0;padding:7px 9px;border:1px solid var(--askw-line);border-radius:7px;background:rgba(255,255,255,.62);color:#2c67c5;text-align:left;font:inherit;font-size:11.5px;cursor:pointer;}',
+    '.askw-citation{display:block;width:100%;margin:5px 0;padding:7px 9px;border:1px solid var(--askw-line);border-radius:7px;background:rgba(255,255,255,.62);color:#b72e29;text-align:left;font:inherit;font-size:11.5px;cursor:pointer;}',
     '.askw-citation:hover{background:#fff}.askw-citation pre{display:none;margin:7px 0 0;white-space:pre-wrap;color:#5d5d5d;background:#f7f7f7;padding:7px;font-size:10px}.askw-citation.expanded pre{display:block}',
     // The passage a piece of evidence lands on, lit for a moment. It is the page's own element, not one of Onyx's.
     '@keyframes askw-evidence{0%,45%{background-color:rgba(250,204,21,.34)}100%{background-color:rgba(250,204,21,0)}}',
@@ -136,11 +136,11 @@
     '.askw-foot .askw-claude{background:var(--askw-accent);border-color:var(--askw-accent);color:#fff;margin-right:auto;}',
     '.askw-foot .askw-claude:hover{background:var(--askw-accent-hover);}',
     '.askw-foot .askw-claude:disabled{opacity:.55;cursor:default;}',
-    '.askw-foot .askw-stop{display:none;color:#b91c1c}.askw-foot .askw-retry{display:none;color:#2c67c5}',
+    '.askw-foot .askw-stop{display:none;color:#b91c1c}.askw-foot .askw-retry{display:none;color:#b72e29}',
     '.askw-followup{display:none;align-items:flex-end;gap:7px;padding:9px 13px;border-top:1px solid var(--askw-soft);background:rgba(255,255,255,.2);flex:0 0 auto;}',
     '.askw-follow-field{flex:1 1 auto;min-width:0;position:relative;}',
     '.askw-follow-input{display:block;width:100%;resize:none;min-height:34px;border:1px solid var(--askw-line);border-radius:9px;background:#fff;padding:7px 10px;font:inherit;font-size:13px;color:#0d0d0d;outline:none;line-height:1.4;}',
-    '.askw-follow-input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(58,131,247,.18);}',
+    '.askw-follow-input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(212,59,53,.18);}',
     '.askw-follow-input:disabled{opacity:.55;background:#fafaf9;}',
     // The follow-up box's own drag grip, drawn as the native one (see dragFollow).
     '.askw-follow-grip{position:absolute;right:2px;bottom:2px;width:14px;height:14px;cursor:ns-resize;opacity:.38;background:linear-gradient(135deg,transparent 0 55%,currentColor 55% 62%,transparent 62% 75%,currentColor 75% 82%,transparent 82%);}',
@@ -153,14 +153,14 @@
     // keyboard focus, or while the picker is open. It is glass lying on the page,
     // so it is tinted for the page under it (data-askw-page), not the app theme:
     // thin at rest, frosted to a readable floor once its name shows. Its icon is
-    // --askw-glass-accent, Onyx's blue, which reads on either glass; the vault look
+    // --askw-glass-accent, Onyx's gem red, which reads on either glass; the vault look
     // recolours it, and the name, only over a page of the vault's own tone.
-    '.askw-pill{--askw-glass-accent:#3a83f7;--askw-glass:rgba(255,255,255,.2);--askw-frost:rgba(255,255,255,.74);position:fixed;top:12px;right:var(--askw-pill-right,12px);z-index:2147483599;display:flex;align-items:center;height:30px;max-width:240px;background:var(--askw-glass);border:1px solid rgba(255,255,255,.55);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.6);backdrop-filter:blur(14px) saturate(1.8);-webkit-backdrop-filter:blur(14px) saturate(1.8);padding:0 7px;font-size:11.5px;color:#5d5d5d;cursor:pointer;transition:padding .2s ease,background-color .2s ease;}',
+    '.askw-pill{--askw-glass-accent:#d43b35;--askw-glass:rgba(255,255,255,.2);--askw-frost:rgba(255,255,255,.74);position:fixed;top:12px;right:var(--askw-pill-right,12px);z-index:2147483599;display:flex;align-items:center;height:30px;max-width:240px;background:var(--askw-glass);border:1px solid rgba(255,255,255,.55);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.6);backdrop-filter:blur(14px) saturate(1.8);-webkit-backdrop-filter:blur(14px) saturate(1.8);padding:0 7px;font-size:11.5px;color:#5d5d5d;cursor:pointer;transition:padding .2s ease,background-color .2s ease;}',
     '.askw-pill .askw-ico{display:block;flex:none;width:14px;height:14px;color:var(--askw-glass-accent);}',
     '.askw-pill b{color:#0d0d0d;font-weight:600;max-width:0;margin-left:0;opacity:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;transition:max-width .2s ease,margin-left .2s ease,opacity .15s;}',
     '.askw-pill:hover,.askw-pill:focus-visible,.askw-pill[aria-expanded="true"]{padding-right:11px;background:var(--askw-frost);}',
     '.askw-pill:hover b,.askw-pill:focus-visible b,.askw-pill[aria-expanded="true"] b{max-width:180px;margin-left:6px;opacity:1;}',
-    'html[data-askw-page="dark"] .askw-pill{--askw-glass:rgba(22,22,22,.24);--askw-frost:rgba(30,30,30,.74);border-color:rgba(255,255,255,.14);box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);color:#cdcdcd;}',
+    'html[data-askw-page="dark"] .askw-pill{--askw-glass-accent:#f16b65;--askw-glass:rgba(22,22,22,.24);--askw-frost:rgba(30,30,30,.74);border-color:rgba(255,255,255,.14);box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);color:#cdcdcd;}',
     'html[data-askw-page="dark"] .askw-pill b{color:#fff;}',
     // Page Only (⌘B in Onyx, initPageOnly): the page alone. Its buttons go; the
     // right-click menu and ⌘⇧A stay, since they show only when called.
@@ -172,12 +172,12 @@
     // carry the glass's own accent, as the pill's icon does: the dark app theme
     // recolours .askw-root, which would leave white on the light glass of a light
     // page, and the vault look its accent, which is only known to read on the vault.
-    '.askw-chats{--askw-glass-accent:#3a83f7;--askw-glass:rgba(255,255,255,.74);--askw-frost:rgba(255,255,255,.92);position:fixed;right:12px;bottom:12px;z-index:2147483599;display:flex;align-items:center;gap:5px;height:30px;padding:0 10px 0 8px;background:var(--askw-glass);border:1px solid rgba(255,255,255,.55);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.6);backdrop-filter:blur(14px) saturate(1.8);-webkit-backdrop-filter:blur(14px) saturate(1.8);font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;transition:background-color .15s ease;}',
+    '.askw-chats{--askw-glass-accent:#d43b35;--askw-glass:rgba(255,255,255,.74);--askw-frost:rgba(255,255,255,.92);position:fixed;right:12px;bottom:12px;z-index:2147483599;display:flex;align-items:center;gap:5px;height:30px;padding:0 10px 0 8px;background:var(--askw-glass);border:1px solid rgba(255,255,255,.55);border-radius:999px;box-shadow:0 6px 18px rgba(0,0,0,.1),inset 0 1px 0 rgba(255,255,255,.6);backdrop-filter:blur(14px) saturate(1.8);-webkit-backdrop-filter:blur(14px) saturate(1.8);font-size:11.5px;font-weight:600;font-variant-numeric:tabular-nums;cursor:pointer;transition:background-color .15s ease;}',
     '.askw-chats[hidden]{display:none;}',
     '.askw-chats .askw-ico{display:block;flex:none;width:15px;height:15px;}',
     '.askw-chats .askw-ico,.askw-chats-n{color:var(--askw-glass-accent);}',
     '.askw-chats:hover,.askw-chats:focus-visible,.askw-chats[aria-expanded="true"]{background:var(--askw-frost);}',
-    'html[data-askw-page="dark"] .askw-chats{--askw-glass:rgba(30,30,30,.74);--askw-frost:rgba(38,38,38,.92);border-color:rgba(255,255,255,.14);box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);}',
+    'html[data-askw-page="dark"] .askw-chats{--askw-glass-accent:#f16b65;--askw-glass:rgba(30,30,30,.74);--askw-frost:rgba(38,38,38,.92);border-color:rgba(255,255,255,.14);box-shadow:0 6px 18px rgba(0,0,0,.3),inset 0 1px 0 rgba(255,255,255,.1);}',
     '.askw-chats-list{position:fixed;right:12px;bottom:50px;z-index:2147483602;display:none;flex-direction:column;width:320px;max-width:calc(100vw - 24px);max-height:min(440px,calc(100vh - 70px));background:rgba(255,255,255,.86);border:1px solid var(--askw-line);border-radius:12px;box-shadow:0 20px 55px rgba(0,0,0,.19),inset 0 1px 0 rgba(255,255,255,.7);backdrop-filter:blur(24px) saturate(1.32);-webkit-backdrop-filter:blur(24px) saturate(1.32);padding:6px;font-size:12.5px;}',
     '.askw-chats-list.open{display:flex;}',
     '.askw-chats-title{flex:none;margin:4px 8px 6px;font-size:10px;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:#78716c;}',
@@ -203,8 +203,8 @@
     '.askw-highlight-editor button{margin-top:4px;padding:4px 8px;border:0;border-radius:5px;background:var(--askw-accent);color:#fff;font:inherit;cursor:pointer;}',
     'html[data-askw-color="dark"] .askw-highlights-switch{color:#cdcdcd;}html[data-askw-color="dark"] .askw-highlight-card:hover{background:rgba(255,255,255,.08);}',
     'html[data-askw-color="dark"] .askw-highlight-editor textarea{background:#292929;color:#fff;}',
-    '.askw-highlight-overlay{position:fixed;inset:0;z-index:2147483590;pointer-events:none;overflow:hidden;}.askw-highlight-overlay i{position:absolute;background:rgba(58,131,247,.12);border-bottom:1px solid rgba(58,131,247,.72);}',
-    '::highlight(askw-passages){background-color:rgba(58,131,247,.14);text-decoration:underline;text-decoration-color:rgba(58,131,247,.72);}',
+    '.askw-highlight-overlay{position:fixed;inset:0;z-index:2147483590;pointer-events:none;overflow:hidden;}.askw-highlight-overlay i{position:absolute;background:rgba(212,59,53,.12);border-bottom:1px solid rgba(212,59,53,.72);}',
+    '::highlight(askw-passages){background-color:rgba(212,59,53,.14);text-decoration:underline;text-decoration-color:rgba(212,59,53,.72);}',
     'html[data-askw-color="dark"] .askw-chats-list{background:rgba(35,35,35,.84);box-shadow:0 26px 70px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.10);}',
     'html[data-askw-color="dark"] .askw-chats-row{color:#fff;}html[data-askw-color="dark"] .askw-chats-row:hover{background:rgba(255,255,255,.10);}html[data-askw-color="dark"] .askw-chats-sel{color:#cdcdcd;}',
     '@supports not ((backdrop-filter:blur(1px)) or (-webkit-backdrop-filter:blur(1px))){.askw-chats-list{background:#fff}.askw-chats{--askw-glass:#fff;--askw-frost:#fff}html[data-askw-color="dark"] .askw-chats-list{background:#242424}html[data-askw-page="dark"] .askw-chats{--askw-glass:#242424;--askw-frost:#242424}}',
@@ -214,13 +214,14 @@
     '.askw-picker.open{display:block;}',
     '.askw-picker label{display:block;font-weight:600;color:#44403c;margin:0 0 5px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;}',
     '.askw-picker input{width:100%;border:1px solid var(--askw-line);border-radius:7px;background:#fff;color:#0d0d0d;padding:7px 9px;font:inherit;font-size:12.5px;outline:none;}',
-    '.askw-picker input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(58,131,247,.18);}',
+    '.askw-picker input:focus{border-color:var(--askw-accent);box-shadow:0 0 0 2px rgba(212,59,53,.18);}',
     '.askw-picker-row{display:flex;gap:6px}.askw-picker-browse{display:none;white-space:nowrap;border:1px solid #d6d3d1;border-radius:7px;background:#fff;padding:0 9px;font:inherit;font-size:11px}.askw-native .askw-picker-browse{display:block}',
     '.askw-recent{margin-top:8px;max-height:160px;overflow-y:auto;}',
     '.askw-recent-item{display:block;width:100%;padding:6px 8px;border:0;border-radius:6px;background:transparent;font:inherit;text-align:left;cursor:pointer;color:#44403c;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}',
     '.askw-recent-item:hover{background:rgba(13,13,13,.07);}',
     '.askw-hint{margin-top:8px;color:#a16207;font-size:11px;line-height:1.4;}',
     '.askw-picker-save{margin-top:8px;width:100%;background:var(--askw-accent);color:#fff;border:none;border-radius:7px;padding:7px;font:inherit;font-size:12px;font-weight:600;cursor:pointer;}',
+    'html[data-askw-color="dark"] .askw-body a,html[data-askw-color="dark"] .askw-eyebrow,html[data-askw-color="dark"] .askw-pillt,html[data-askw-color="dark"] .askw-origin,html[data-askw-color="dark"] .askw-citation,html[data-askw-color="dark"] .askw-foot .askw-retry{color:#f16b65;}',
     'html[data-askw-color="dark"] .askw-root{color:#fff;--askw-line:rgba(255,255,255,.15);--askw-soft:rgba(255,255,255,.07);}',
     'html[data-askw-color="dark"] .askw-menu,html[data-askw-color="dark"] .askw-panel,html[data-askw-color="dark"] .askw-picker{background:rgba(35,35,35,.84);box-shadow:0 26px 70px rgba(0,0,0,.42),inset 0 1px 0 rgba(255,255,255,.10);}',
     'html[data-askw-color="dark"] .askw-item,html[data-askw-color="dark"] .askw-body{color:#fff;}',

@@ -179,7 +179,7 @@ class VaultLookApiTests(unittest.TestCase):
                 for ground in ("rgb(253, 246, 227)", "rgb(0, 0, 0)"):
                     ink = "rgb(0, 0, 0)" if ground != "rgb(0, 0, 0)" else "rgb(255, 255, 255)"
                     unlinked = client.post("/api/page-look", json={"token": config.token, "background": ground, "ink": ink}).json()
-                    self.assertIn("--accent:58 131 247", unlinked["css"])
+                    self.assertIn("--accent:212 59 53", unlinked["css"])
                 invalid = [
                     ("rgba(0, 0, 0, .5)", colors["ink"]),
                     ("red;}</style><script>alert(1)</script>", colors["ink"]),

@@ -200,7 +200,7 @@ body:not(.kind-html) #add-toggle,body:not(.kind-html) #add-panel{{display:none}}
 #tree summary,#tree .file{{display:flex;align-items:center;gap:9px;min-height:30px;margin:1px 0;padding:5px 10px;border-radius:9px;color:rgb(var(--ink)/.84);text-decoration:none;white-space:nowrap;user-select:none;transition:background-color .12s,color .12s}}
 #tree summary{{cursor:default;list-style:none}} #tree summary::-webkit-details-marker{{display:none}} #tree .lbl{{min-width:0;overflow:hidden;text-overflow:ellipsis}}
 #tree .chev{{display:none;flex:none;width:14px;height:14px;transition:transform .12s}} #tree details[open]>summary .chev{{transform:rotate(90deg)}}
-#tree .fold{{display:grid;flex:none;width:16px;height:16px;color:rgb(var(--ink)/.6)}} #tree .fold svg{{grid-area:1/1;width:16px;height:16px}} #tree .fold .open,#tree details[open]>summary .fold .shut{{display:none}} #tree details[open]>summary .fold .open{{display:block}}
+#tree .fold{{display:grid;flex:none;width:16px;height:16px;color:rgb(var(--accent))}} #tree .fold svg{{grid-area:1/1;width:16px;height:16px}} #tree .fold .open,#tree details[open]>summary .fold .shut{{display:none}} #tree details[open]>summary .fold .open{{display:block}}
 #tree summary:hover,#tree .file:hover{{background:rgb(var(--ink)/.045);color:rgb(var(--ink))}} #tree a.file.active{{background:rgb(var(--ink)/.12);color:rgb(var(--ink));font-weight:500}}
 #tree summary:focus-visible,#tree .file:focus-visible{{outline:2px solid rgb(var(--accent));outline-offset:-2px}}
 #tree .sym{{flex:none;margin-left:auto;color:rgb(var(--faint));font-size:11px;opacity:0;transition:opacity .12s}} #tree summary:hover .sym{{opacity:1}}
@@ -291,7 +291,7 @@ body.side-resizing,body.side-resizing *{{cursor:col-resize!important;user-select
 .move-list{{max-height:min(340px,60vh);overflow:auto;margin-top:6px}} .move-list button{{overflow:hidden;text-overflow:ellipsis}} .move-list button:focus{{background:transparent;color:inherit}} .move-list button[aria-selected=true]{{background:rgb(var(--accent));color:#fff}} .move-none{{padding:6px 8px;color:rgb(var(--faint))}}
 #tree .dragging{{opacity:.45}} #tree .drop-into{{background:rgb(var(--accent)/.12);box-shadow:inset 0 0 0 2px rgb(var(--accent))}} #tree.drop-root{{border-radius:10px;box-shadow:inset 0 0 0 2px rgb(var(--accent)/.55)}}
 #tree .pinned{{display:grid;flex:none;margin-left:auto;color:rgb(var(--faint))}} #tree .pinned svg{{width:11px;height:11px}} #tree .pinned+.sym{{margin-left:4px}}
-#tree .new-folder>svg{{flex:none;width:16px;height:16px;color:rgb(var(--ink)/.6)}} #tree .lbl:has(.name-edit){{flex:1}}
+#tree .new-folder>svg{{flex:none;width:16px;height:16px;color:rgb(var(--accent))}} #tree .lbl:has(.name-edit){{flex:1}}
 #tree .name-edit{{width:100%;min-width:0;margin:-3px 0;padding:2px 6px;border:1px solid rgb(var(--accent));border-radius:6px;background:rgb(var(--bg-input));color:rgb(var(--ink));font:inherit;outline:2px solid rgb(var(--accent)/.26)}}
 /* Outline: the page's headings on the reader's right, as Obsidian's outline pane. Docked (pinned), it is the grid's third
    column; floating (the default), it lies over the reader like the unpinned sidebar and comes out on the reader's right

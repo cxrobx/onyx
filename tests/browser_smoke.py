@@ -1962,7 +1962,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     expect(bubble).to_be_visible()
                     expect(bubble).to_have_text("2")
                     for ink in (bubble.locator("svg"), bubble.locator(".askw-chats-n")):
-                        expect(ink).to_have_css("color", "rgb(58, 131, 247)")
+                        expect(ink).to_have_css("color", "rgb(212, 59, 53)")
                     box = bubble.bounding_box()
                     self.assertGreater(box["x"] + box["width"], 1100 - 40)
                     self.assertGreater(box["y"] + box["height"], 700 - 40)
@@ -2075,7 +2075,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     for _ in range(4):
                         page.keyboard.press("ArrowDown")
                     expect(items.nth(3)).to_be_focused()
-                    self.assertEqual(items.nth(3).evaluate("e => getComputedStyle(e).backgroundColor"), "rgb(58, 131, 247)")
+                    self.assertEqual(items.nth(3).evaluate("e => getComputedStyle(e).backgroundColor"), "rgb(212, 59, 53)")
                     page.keyboard.press("Enter")  # Option still down: no keypress in Chromium
                     page.keyboard.up("Alt")
                     expect(menu).to_be_hidden()
