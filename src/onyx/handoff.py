@@ -65,6 +65,17 @@ def open_in_provider(provider: str, folder: Path, prompt: str) -> None:
     )
     launch.chmod(0o755)
 
+    router = Path.home() / ".local/bin/cx-open-in-herdr"
+    if provider == "claude" and router.is_file():
+        result = subprocess.run(
+            [str(router), "--cwd", str(folder), "--launch", str(launch),
+             "--tab", "Onyx · " + folder.name],
+            stdin=subprocess.DEVNULL, capture_output=True, text=True, timeout=40,
+        )
+        if result.returncode:
+            raise RuntimeError(result.stderr.strip() or "Could not open Claude in Herdr.")
+        return
+
     if kind == "ghostty":
         # `open -na` forces a NEW Ghostty instance (so our `-e` command is honored
         # even when Ghostty is already running). On macOS a fresh instance also
