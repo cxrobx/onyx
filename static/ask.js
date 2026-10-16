@@ -800,6 +800,13 @@
     return { bg: bg.join(' '), ink: ink.join(' ') };
   }
   window.askwNoteColours = noteColours;
+  // What the ask box would send, for Quick Ask's read-only bridge: the selection and its
+  // surroundings, or the page excerpt when nothing is selected.
+  window.askwQuickAskContext = function () {
+    var captured = captureFromSelection();
+    return captured ? { passage: captured.text, surrounding: captured.context, page: captured.page }
+      : { passage: '', surrounding: pageContext(), page: null };
+  };
 
   function showTrigger(captured) {
     // Not beside the open menu either: moving the menu can end in a release over the page.

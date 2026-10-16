@@ -60,7 +60,7 @@ private final class OnyxQuickAskContext {
                 let reply = Reply(), ready = DispatchSemaphore(value: 0)
                 DispatchQueue.main.async { snapshot { reply.set($0); ready.signal() } }
                 let value: Any = ready.wait(timeout: .now() + 0.22) == .success ? (reply.get() as Any? ?? NSNull()) : NSNull()
-                if var encoded = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoded.count < 32_000 {
+                if var encoded = try? JSONSerialization.data(withJSONObject: value, options: [.fragmentsAllowed]), encoded.count < 64_000 {
                     encoded.append(10)
                     encoded.withUnsafeBytes { _ = Darwin.write(client, $0.baseAddress, encoded.count) }
                 }
@@ -1100,14 +1100,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
         quickAskContext = OnyxQuickAskContext { [weak self] reply in
             guard let self, let view = self.webView, let url = view.url,
                   url.host == "127.0.0.1", url.port == port else { reply(nil); return }
-            // Only the shell's active reader frame supplies identity. No body text or write capability.
+            // Only the shell's active reader frame supplies identity, plus what its ask box would send. No write capability.
             view.evaluateJavaScript("""
             (() => {
               const f = document.getElementById('reader'), d = f?.contentDocument;
               if (!d) return null;
               return {src: d.querySelector('meta[name="askw-src"]')?.content || '',
                       sig: d.querySelector('meta[name="askw-doc-sig"]')?.content || '',
-                      title: d.title || '', editing: !!f.contentWindow.askwEditor?.live()};
+                      title: d.title || '', editing: !!f.contentWindow.askwEditor?.live(),
+                      ask: f.contentWindow.askwQuickAskContext?.() || null};
             })()
             """) { [weak self] value, _ in
                 guard let self, let data = value as? [String: Any], let src = data["src"] as? String, !src.isEmpty else { reply(nil); return }
@@ -1117,9 +1118,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, WKNavigationDelegate,
                 if src.hasPrefix("/") {
                     records["document_path"] = URL(fileURLWithPath: src).resolvingSymlinksInPath().standardizedFileURL.path
                 } else { records["source_url"] = src }
-                reply(["pid": ProcessInfo.processInfo.processIdentifier, "bundleID": "com.cx.onyx", "windowLabel": "main",
+                var context: [String: Any] = ["pid": ProcessInfo.processInfo.processIdentifier, "bundleID": "com.cx.onyx", "windowLabel": "main",
                        "windowID": self.window.windowNumber, "revision": "\(src):\(sig):\(editing)",
-                       "label": String((data["title"] as? String ?? "Document").prefix(1000)), "records": records])
+                       "label": String((data["title"] as? String ?? "Document").prefix(1000)), "records": records]
+                // What the ask box would send: the selection and its surroundings, or the page excerpt.
+                if let ask = data["ask"] as? [String: Any] {
+                    context["passage"] = String((ask["passage"] as? String ?? "").prefix(4000))
+                    context["surrounding"] = String((ask["surrounding"] as? String ?? "").prefix(4000))
+                    if let page = ask["page"] as? Int { context["page"] = page }
+                }
+                reply(context)
             }
         }
 
