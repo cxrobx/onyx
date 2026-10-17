@@ -361,8 +361,8 @@ class RelatedTests(unittest.TestCase):
         for path, name in (
             ("Resources/Jev.md", "jev"),
             ("Artifacts/Resources/Jev/Jev.html", "jev"),
-            ("Meetings/AEG Sync 04.28.26 2.md", "aeg sync 04.28.26"),
-            ("Meetings/AEG Sync 04.28.26 copy.md", "aeg sync 04.28.26"),
+            ("Meetings/Team Sync 04.28.26 2.md", "team sync 04.28.26"),
+            ("Meetings/Team Sync 04.28.26 copy.md", "team sync 04.28.26"),
             ("Notes/report (1).md", "report"),
             ("Notes/no-extension", "no-extension"),
         ):

@@ -284,14 +284,14 @@ def sections(heading_path: str, title: Any) -> tuple[str, str]:
     return (trail[-1] if trail else ""), " › ".join(rest)
 
 
-# A copy's tail: "AEG Sync 04.28.26 2.md" beside "AEG Sync 04.28.26.md", and what Finder and Obsidian add.
+# A copy's tail: "Team Sync 04.28.26 2.md" beside "Team Sync 04.28.26.md", and what Finder and Obsidian add.
 _COPY_TAIL_RE = re.compile(r"[ _-](?:copy|copy \d{1,2}|\(\d{1,2}\)|\d{1,2})$")
 
 
 def document_name(path: str) -> str:
     """What an index path calls its document: the filename, without its format and without a copy's tail.
 
-    ``Jev.md`` and ``Jev.html`` are one document under two formats, and ``AEG Sync 04.28.26 2.md`` is a copy of one,
+    ``Jev.md`` and ``Jev.html`` are one document under two formats, and ``Team Sync 04.28.26 2.md`` is a copy of one,
     so all three answer the same thing. What that is worth depends on how many pages answer it too (``_Passages``).
     """
     base = path.rpartition("/")[2]
