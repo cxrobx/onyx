@@ -65,6 +65,9 @@ ${CALLOUT_COLOURS}
 body .askw-ed .askw-ed-fnref{font-size:.75em;vertical-align:super;line-height:0;color:rgb(var(--reader-accent))}
 body .askw-ed .askw-ed-tag{padding:1px 6px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}
 body .askw-ed .askw-ed-comment{color:rgb(var(--reader-faint))}
+body .askw-ed .cm-line.askw-ed-hang{padding-left:var(--askw-hang);text-indent:calc(-1 * var(--askw-lead))}
+body .askw-ed .cm-line.askw-ed-hang *{text-indent:0}
+body .askw-ed .askw-ed-indent{display:inline-block}
 body .askw-ed .askw-ed-bullet{display:inline-block;min-width:.6em;text-align:center;color:rgb(var(--reader-muted))}
 body .askw-ed .askw-ed-hr{display:inline-block;width:100%;height:0;vertical-align:middle;border-top:1px solid rgb(var(--reader-line)/.14)}
 body .askw-ed .cm-line.askw-ed-pre{font:14px/1.55 ${MONO};background:rgb(var(--reader-code)/.88);padding:0 18px}

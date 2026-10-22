@@ -3653,6 +3653,56 @@ class BrowserSmokeTests(unittest.TestCase):
                     browser.close()
         self.assertEqual(page_errors, [])
 
+    def test_a_list_item_hangs_its_wrapped_and_continued_lines_under_its_text(self) -> None:
+        # As in Obsidian: a bullet, a nested bullet, a task and a numbered item that wrap carry on under their text, not
+        # back under the marker, and so does a line Shift+Enter adds to the item. Both with the marker drawn and with the
+        # cursor on it (its `-` shown as typed). Both engines.
+        long = "goes on and on so that it has to wrap onto a second line in a narrow window, well past the edge of it"
+        note = self.root / "hang.md"
+        note.write_text(f"# Hang\n\n- bullet {long}\n\t- nested {long}\n- [ ] task {long}\n1. numbered {long}\n- short\n  continued\n",
+                        encoding="utf-8")
+        rows = """word => {
+          const view = document.querySelector('.cm-content').cmTile.root.view, doc = view.state.doc.toString();
+          const at = doc.indexOf(word), line = view.state.doc.lineAt(at);
+          const text = view.coordsAtPos(at, 1).left, end = view.coordsAtPos(line.to, -1);
+          const lineEl = view.domAtPos(line.from).node;
+          const el = (lineEl.nodeType === 1 ? lineEl : lineEl.parentElement).closest('.cm-line');
+          return {text, wrapped: end.left, wraps: end.top > view.coordsAtPos(at, 1).top + 4,
+                  rowStart: view.coordsAtPos(view.posAtCoords({x: el.getBoundingClientRect().left + 1, y: end.top + 2}), 1).left};
+        }"""
+        page_errors: list[str] = []
+        with sync_playwright() as playwright:
+            for engine in ("chromium", "webkit"):
+                with self.subTest(engine=engine):
+                    browser = getattr(playwright, engine).launch(headless=True)
+                    page = browser.new_page(viewport={"width": 760, "height": 900})
+                    page.on("pageerror", lambda error, engine=engine: page_errors.append(f"{engine}: {error}"))
+                    page.goto(f"{self.base_url}/?{urllib.parse.urlencode({'src': str(note)})}", wait_until="networkidle")
+                    frame = page.frame_locator("iframe[name=reader]")
+                    reader = page.frame(name="reader")
+                    frame.locator("h1").click()
+                    page.keyboard.press("Meta+e")
+                    expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
+                    for cursor in ("away", "on"):
+                        for word in ("bullet ", "nested ", "task ", "numbered "):
+                            if cursor == "on":
+                                reader.evaluate("""word => { const v = document.querySelector('.cm-content').cmTile.root.view;
+                                  v.dispatch({selection: {anchor: v.state.doc.lineAt(v.state.doc.toString().indexOf(word)).from}}); v.focus(); }""", word)
+                            else:
+                                reader.evaluate("() => { const v = document.querySelector('.cm-content').cmTile.root.view; v.dispatch({selection: {anchor: 2}}); }")
+                            page.wait_for_timeout(150)
+                            got = reader.evaluate(rows, word)
+                            self.assertTrue(got["wraps"], (engine, word))
+                            # The wrapped row starts where the item's text does.
+                            self.assertLessEqual(abs(got["rowStart"] - got["text"]), 1, (engine, cursor, word, got))
+                    reader.evaluate("() => { const v = document.querySelector('.cm-content').cmTile.root.view; v.dispatch({selection: {anchor: 2}}); }")
+                    page.wait_for_timeout(150)
+                    short, continued = (reader.evaluate("""word => { const v = document.querySelector('.cm-content').cmTile.root.view;
+                      return v.coordsAtPos(v.state.doc.toString().indexOf(word), 1).left; }""", w) for w in ("short", "continued"))
+                    self.assertLessEqual(abs(short - continued), 1, engine)
+                    browser.close()
+        self.assertEqual(page_errors, [])
+
     def test_headings_and_list_items_fold_while_editing(self) -> None:
         # Obsidian's "Fold heading" and "Fold indent": an arrow in the margin folds a heading's section (to the next
         # heading as high) or a list item's children, and the line ends in "…", which opens it again. A find that lands

@@ -16,6 +16,7 @@ import { Autolink, MarkdownParser, Strikethrough, Table, TaskList } from "@lezer
 import { imageAttachments } from "./attach";
 import { lineChanges } from "./diff";
 import { folding, rememberFolds } from "./fold";
+import { hangingIndent } from "./hang";
 import { comments, hashtags, highlights, ImageSource, imageSource, imagesChanged, inlineRuns, livePreview, tables, wikilinks } from "./preview";
 import { htmlPaste } from "./paste";
 import { CSS } from "./style";
@@ -332,6 +333,7 @@ export async function open(options: OpenOptions): Promise<Session> {
         EditorView.lineWrapping,
         yamlFrontmatter({ content: markdownSupport }),
         livePreview,
+        hangingIndent,
         tables,
         folding,
         rememberFolds("askw:folds:" + options.src),
