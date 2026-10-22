@@ -51,8 +51,8 @@ body .askw-ed .askw-ed-mark{color:rgb(var(--reader-faint))}
 body .askw-ed .askw-ed-link{color:rgb(var(--reader-accent));text-decoration:underline;text-underline-offset:2px}
 body .askw-ed [data-askw-href],body .askw-ed [data-askw-wiki]{cursor:pointer}
 body .askw-ed .askw-ed-embed{color:rgb(var(--reader-muted))}
-body .askw-ed .cm-line.askw-ed-quote{padding-left:20px;border-left:3px solid rgb(var(--reader-line)/.16);color:rgb(var(--reader-muted))}
-body .askw-ed .cm-line.askw-ed-callout{--callout-color:var(--callout-blue,8 109 221);padding:0 12px 0 24px;background:rgb(var(--callout-color)/.1)}
+body .askw-ed .cm-line.askw-ed-quote{--askw-pad:20px;padding-left:20px;border-left:3px solid rgb(var(--reader-line)/.16);color:rgb(var(--reader-muted))}
+body .askw-ed .cm-line.askw-ed-callout{--callout-color:var(--callout-blue,8 109 221);--askw-pad:24px;padding:0 12px 0 24px;background:rgb(var(--callout-color)/.1)}
 body .askw-ed .cm-line.askw-ed-callout-title{padding-top:12px;border-radius:4px 4px 0 0;color:rgb(var(--callout-color));font-weight:600}
 body .askw-ed .cm-line.askw-ed-callout-last{padding-bottom:12px;border-radius:0 0 4px 4px}
 body .askw-ed .cm-line.askw-ed-callout-title.askw-ed-callout-last{border-radius:4px}
@@ -65,7 +65,7 @@ ${CALLOUT_COLOURS}
 body .askw-ed .askw-ed-fnref{font-size:.75em;vertical-align:super;line-height:0;color:rgb(var(--reader-accent))}
 body .askw-ed .askw-ed-tag{padding:1px 6px;border-radius:999px;background:rgb(var(--reader-accent)/.12);color:rgb(var(--reader-accent));font-size:.85em}
 body .askw-ed .askw-ed-comment{color:rgb(var(--reader-faint))}
-body .askw-ed .cm-line.askw-ed-hang{padding-left:var(--askw-hang);text-indent:calc(-1 * var(--askw-lead))}
+body .askw-ed .cm-line.askw-ed-hang{padding-left:calc(var(--askw-pad,0px) + var(--askw-hang));text-indent:calc(-1 * var(--askw-lead))}
 body .askw-ed .cm-line.askw-ed-hang *{text-indent:0}
 body .askw-ed .askw-ed-indent{display:inline-block}
 body .askw-ed .askw-ed-bullet{display:inline-block;min-width:.6em;text-align:center;color:rgb(var(--reader-muted))}

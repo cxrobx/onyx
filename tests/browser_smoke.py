@@ -3374,9 +3374,16 @@ class BrowserSmokeTests(unittest.TestCase):
             ("- a\n\t- b|", ["Enter", "Enter"], "- a\n\t- b\n- |"),                  # or comes out a level
             ("- [x] done|", ["Enter"], "- [x] done\n- [ ] |"),
             ("1. a|\n2. b", ["Enter", "type:x"], "1. a\n2. x|\n3. b"),
-            ("> q|", ["Enter", "Enter"], "> q\n|"),
+            ("> q|", ["Enter", "Enter"], "> q\n\n|"),                               # a blank line, or the next is quote
+            ("> - a|", ["Enter", "Enter"], "> - a\n> |"),                           # a list in a quote ends in the quote
             ("- a\n- b|", ["Tab"], "- a\n\t- b|"),
             ("- one|", ["Shift+Enter", "type:more"], "- one\n  more|"),
+            # Each checked against Obsidian 1.14 typing the same keys: Enter after a Shift+Enter line is the next item.
+            ("- one\n  more|", ["Enter", "type:next"], "- one\n  more\n- next|"),
+            ("1. a\n   more|", ["Enter", "type:b"], "1. a\n   more\n2. b|"),
+            ("- [ ] t|", ["Shift+Enter", "type:more", "Enter"], "- [ ] t\n      more\n- [ ] |"),
+            ("> - a\n>   more|", ["Enter"], "> - a\n>   more\n> - |"),
+            ("- one\n- |", ["Backspace"], "- one\n-|"),                             # takes the space, not the marker
             ("a |", ["type:(x)"], "a (x)|"),
             ("don|", ["type:'t"], "don't|"),
             ("a |", ["type:**b**"], "a **b**|"),
@@ -3655,11 +3662,12 @@ class BrowserSmokeTests(unittest.TestCase):
 
     def test_a_list_item_hangs_its_wrapped_and_continued_lines_under_its_text(self) -> None:
         # As in Obsidian: a bullet, a nested bullet, a task and a numbered item that wrap carry on under their text, not
-        # back under the marker, and so does a line Shift+Enter adds to the item. Both with the marker drawn and with the
+        # back under the marker, in a quote or callout too, and so does a line Shift+Enter adds to the item. Both with the marker drawn and with the
         # cursor on it (its `-` shown as typed). Both engines.
         long = "goes on and on so that it has to wrap onto a second line in a narrow window, well past the edge of it"
         note = self.root / "hang.md"
-        note.write_text(f"# Hang\n\n- bullet {long}\n\t- nested {long}\n- [ ] task {long}\n1. numbered {long}\n- short\n  continued\n",
+        note.write_text(f"# Hang\n\n- bullet {long}\n\t- nested {long}\n- [ ] task {long}\n1. numbered {long}\n- short\n  continued\n\n"
+                        f"> - quoted {long}\n>   more\n\n> [!note] Title\n> - callout {long}\n",
                         encoding="utf-8")
         rows = """word => {
           const view = document.querySelector('.cm-content').cmTile.root.view, doc = view.state.doc.toString();
@@ -3684,7 +3692,7 @@ class BrowserSmokeTests(unittest.TestCase):
                     page.keyboard.press("Meta+e")
                     expect(frame.locator(".askw-ed .cm-content")).to_be_visible()
                     for cursor in ("away", "on"):
-                        for word in ("bullet ", "nested ", "task ", "numbered "):
+                        for word in ("bullet ", "nested ", "task ", "numbered ", "quoted ", "callout "):
                             if cursor == "on":
                                 reader.evaluate("""word => { const v = document.querySelector('.cm-content').cmTile.root.view;
                                   v.dispatch({selection: {anchor: v.state.doc.lineAt(v.state.doc.toString().indexOf(word)).from}}); v.focus(); }""", word)
@@ -3697,9 +3705,10 @@ class BrowserSmokeTests(unittest.TestCase):
                             self.assertLessEqual(abs(got["rowStart"] - got["text"]), 1, (engine, cursor, word, got))
                     reader.evaluate("() => { const v = document.querySelector('.cm-content').cmTile.root.view; v.dispatch({selection: {anchor: 2}}); }")
                     page.wait_for_timeout(150)
-                    short, continued = (reader.evaluate("""word => { const v = document.querySelector('.cm-content').cmTile.root.view;
-                      return v.coordsAtPos(v.state.doc.toString().indexOf(word), 1).left; }""", w) for w in ("short", "continued"))
-                    self.assertLessEqual(abs(short - continued), 1, engine)
+                    left = """word => { const v = document.querySelector('.cm-content').cmTile.root.view;
+                      return v.coordsAtPos(v.state.doc.toString().indexOf(word), 1).left; }"""
+                    for item, continued in (("short", "continued"), ("quoted", "more")):
+                        self.assertLessEqual(abs(reader.evaluate(left, item) - reader.evaluate(left, continued)), 1, (engine, continued))
                     browser.close()
         self.assertEqual(page_errors, [])
 

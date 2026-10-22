@@ -38,9 +38,10 @@ function measure(view: EditorView): { key: string; deco: Range<Decoration>[]; do
     for (let pos = from; pos <= to;) {
       const line = doc.lineAt(pos);
       pos = line.to + 1;
-      // A quote's lines have their own padding and rule; a list in one is left as it was.
-      if (!line.text.trim() || /^\s*>/.test(line.text)) continue;
-      const ws = /^[ \t]*/.exec(line.text)![0].length;
+      if (!line.text.trim()) continue;
+      // A list in a quote hangs inside it: past the quote's marks, which are measured with the rest of the lead.
+      const quote = /^(?:[ \t]*>[ \t]?)*/.exec(line.text)![0].length;
+      const ws = quote + /^[ \t]*/.exec(line.text.slice(quote))![0].length;
       let item = null;
       for (let n: ReturnType<typeof tree.resolveInner> | null = tree.resolveInner(line.from + ws, 1); n; n = n.parent) {
         if (OWN_INDENT.has(n.name)) break;
@@ -52,7 +53,7 @@ function measure(view: EditorView): { key: string; deco: Range<Decoration>[]; do
       const hang = itemHang.get(first.from), lead = first.number === line.number ? hang : width(view, line.from, line.from + ws);
       if (hang == null || lead == null || (!hang && !lead)) continue;
       deco.push(Decoration.line({ class: "askw-ed-hang", attributes: { style: `--askw-hang:${hang}px;--askw-lead:${lead}px` } }).range(line.from));
-      if (ws) deco.push(indentBox.range(line.from, line.from + ws));
+      if (ws > quote) deco.push(indentBox.range(line.from + quote, line.from + ws));
       parts.push(`${line.from}:${hang}:${lead}`);
     }
   }

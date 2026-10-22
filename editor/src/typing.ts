@@ -1,7 +1,7 @@
 // What typing does in the editor, as Obsidian does it with its default settings (Auto-pair brackets, Auto-pair Markdown
 // syntax, Smart lists, Indent using tabs) and its default hotkeys. main.ts adds these ahead of CodeMirror's own keymap.
 import { defaultKeymap, deleteLine, indentWithTab } from "@codemirror/commands";
-import { indentUnit } from "@codemirror/language";
+import { indentUnit, syntaxTree } from "@codemirror/language";
 import { insertNewlineContinueMarkupCommand, pasteURLAsLink } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState, Extension, Prec, StateCommand } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, rectangularSelection } from "@codemirror/view";
@@ -149,9 +149,7 @@ const softBreak: StateCommand = ({ state, dispatch }) => {
   dispatch(state.update(state.changeByRange((range) => {
     const line = state.doc.lineAt(range.from), [whole, quote, marker] = LEAD.exec(line.text)!;
     // On an item's first line, its marker (and task box) turns to spaces; on a line already inside one, its indent stays.
-    const lead = marker
-      ? quote + whole.slice(quote.length).replace(/\[.\][ \t]?$/, "").replace(/[^\t]/g, " ")
-      : /^[\s>]*/.exec(line.text)![0];
+    const lead = marker ? quote + whole.slice(quote.length).replace(/[^\t]/g, " ") : /^[\s>]*/.exec(line.text)![0];
     const insert = state.lineBreak + lead;
     return { changes: { from: range.from, to: range.to, insert }, range: EditorSelection.cursor(range.from + insert.length) };
   }), { userEvent: "input", scrollIntoView: true }));
@@ -159,15 +157,64 @@ const softBreak: StateCommand = ({ state, dispatch }) => {
 };
 
 const continueMarkup = insertNewlineContinueMarkupCommand({ nonTightLists: false });
+const QUOTE = /^(?:[ \t]*>[ \t]?)*/;
+
 // Enter on a quote line with nothing in it takes one level of quote away, so a second Enter leaves the quote, where
-// CodeMirror would want two empty quote lines first.
+// CodeMirror would want two empty quote lines first. Leaving the last level leaves a blank line too, as Obsidian does:
+// without one, the next line would be read as more of the quote.
 const leaveQuote: StateCommand = ({ state, dispatch }) => {
   const main = state.selection.main;
   if (state.selection.ranges.length > 1 || !main.empty) return false;
   const line = state.doc.lineAt(main.head);
   if (main.head !== line.to || !/^\s*(?:>\s?)+$/.test(line.text)) return false;
-  const keep = line.text.replace(/>\s?$/, "");
+  const keep = line.text.replace(/>\s?$/, ""), insert = keep.trim() ? keep : state.lineBreak;
+  dispatch(state.update({ changes: { from: line.from, to: line.to, insert }, selection: { anchor: line.from + insert.length }, userEvent: "delete", scrollIntoView: true }));
+  return true;
+};
+
+// Enter on an empty item at a quote's top level ends the list but stays in the quote, as Obsidian does: `> - ` is `> `.
+const leaveListInQuote: StateCommand = ({ state, dispatch }) => {
+  const main = state.selection.main;
+  if (state.selection.ranges.length > 1 || !main.empty) return false;
+  const line = state.doc.lineAt(main.head), m = /^((?:[ \t]*>[ \t]?)+)(?:[-*+]|\d+[.)])[ \t]+(?:\[.\][ \t]*)?$/.exec(line.text);
+  if (main.head !== line.to || !m) return false;
+  const keep = m[1].replace(/>$/, "> ");
   dispatch(state.update({ changes: { from: line.from, to: line.to, insert: keep }, selection: { anchor: line.from + keep.length }, userEvent: "delete", scrollIntoView: true }));
+  return true;
+};
+
+// Enter on a line of an item after its first (one Shift+Enter made) starts the next item, as Obsidian does, where
+// CodeMirror would carry on the same item: its marker, numbered on, and an empty box for a task.
+const nextItem: StateCommand = ({ state, dispatch }) => {
+  const main = state.selection.main;
+  if (state.selection.ranges.length > 1 || !main.empty) return false;
+  const line = state.doc.lineAt(main.head);
+  if (!line.text.trim() || LEAD.exec(line.text)![2]) return false;
+  let item = null;
+  for (let n: ReturnType<ReturnType<typeof syntaxTree>["resolveInner"]> | null = syntaxTree(state).resolveInner(main.head, -1); n; n = n.parent) {
+    if (n.name === "FencedCode" || n.name === "CodeBlock" || n.name === "Table") return false;
+    if (n.name === "ListItem") { item = n; break; }
+  }
+  if (!item) return false;
+  const first = state.doc.lineAt(item.from);
+  if (first.number === line.number) return false;
+  const [, quote, marker, gap, box] = LEAD.exec(first.text)!;
+  if (!marker) return false;
+  const number = /^(\d+)([.)])$/.exec(marker);
+  const next = (number ? `${+number[1] + 1}${number[2]}` : marker) + gap + (box !== undefined ? "[ ] " : "");
+  const insert = state.lineBreak + QUOTE.exec(line.text)![0] + quote.replace(QUOTE, "") + next;
+  dispatch(state.update({ changes: { from: main.head, insert }, selection: { anchor: main.head + insert.length }, userEvent: "input", scrollIntoView: true }));
+  return true;
+};
+
+// Backspace just after a list marker takes the space, as Obsidian does, where CodeMirror would turn the marker into
+// indent and leave the line inside the item above.
+const backspaceAfterMarker: StateCommand = ({ state, dispatch }) => {
+  const main = state.selection.main;
+  if (state.selection.ranges.length > 1 || !main.empty) return false;
+  const line = state.doc.lineAt(main.head), m = LEAD.exec(line.text)!;
+  if (!m[2] || main.head !== line.from + m[0].length || !/[ \t]$/.test(m[0])) return false;
+  dispatch(state.update({ changes: { from: main.head - 1, to: main.head }, selection: { anchor: main.head - 1 }, userEvent: "delete.backward", scrollIntoView: true }));
   return true;
 };
 
@@ -186,8 +233,8 @@ export const typing: Extension = [
   // Enter on an empty item always ends it, or takes it out a level when it is nested, where CodeMirror would rather turn
   // a two-item list loose.
   Prec.highest(keymap.of([
-    { key: "Enter", run: (t) => leaveQuote(t) || continueMarkup(t) },
-    { key: "Backspace", run: deletePair },
+    { key: "Enter", run: (t) => leaveQuote(t) || leaveListInQuote(t) || nextItem(t) || continueMarkup(t) },
+    { key: "Backspace", run: (t) => deletePair(t) || backspaceAfterMarker(t) },
   ])),
   keymap.of([
     { key: "Mod-b", run: toggleWrap("**") },
