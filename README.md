@@ -2,15 +2,15 @@
 
 **A local-first second brain for Markdown notes and interactive HTML artifacts on macOS — Obsidian reinvented for the agentic era.**
 
-Onyx unifies your Obsidian Markdown vault and your AI-generated HTML artifacts (interactive reports, explainers, dashboards, prototypes) in one native macOS workspace — with **Obsidian-style Live Preview editing (`⌘E`)**, **hybrid keyword + semantic search (`⌘P`) and Related Pages powered by [`vault-mcp`](https://github.com/cxrobx/vault-mcp)**, and **inline highlight-to-ask (`ELI5`, `Prove it`, `Ask a question…`)** grounded in your own files on your existing Claude or ChatGPT subscription.
+Onyx unifies your Obsidian Markdown vault and your AI-generated HTML artifacts (visual explainers, interactive learning guides, deep-dive essays, dashboards) in one native macOS workspace — with **Obsidian-style Live Preview editing (`⌘E`)**, **hybrid keyword + semantic search (`⌘P`) and Related Pages powered by [`vault-mcp`](https://github.com/cxrobx/vault-mcp)**, and **inline highlight-to-ask (`ELI5`, `Prove it`, `Ask a question…`)** grounded in your own files on your existing Claude or ChatGPT subscription.
 
-![Onyx unified Notes and HTML Artifacts sidebar, ⌘P hybrid search via vault-mcp, interactive HTML artifact, and inline Prove it with verified-on-disk citations (illustrative content)](docs/media/onyx-demo.gif)
+![Onyx unified Notes and HTML Artifacts sidebar, ⌘P hybrid search via vault-mcp, interactive HTML visual guide with Match page appearance, and inline ELI5 with verified citations from your reading notes (illustrative content)](docs/media/onyx-demo.gif)
 
 <sub>Illustrative article and answer. [Watch the full 38-second overview with sound](https://cxventures.io/products/onyx).</sub>
 
 ## Why
 
-Coding agents now produce rich interactive HTML artifacts alongside plain Markdown notes, while traditional note apps treat HTML as second-class files and force you to copy passages out into a chat window to interrogate them.
+AI tools now produce beautiful interactive HTML visual guides, explainers, and essays alongside plain Markdown notes — while traditional note apps treat HTML as second-class files and force you to copy passages out into a chat window to learn from them.
 
 Onyx brings both worlds together on disk:
 
