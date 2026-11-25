@@ -4,7 +4,7 @@
 
 Onyx unifies your Obsidian Markdown vault and your AI-generated HTML artifacts (interactive reports, explainers, dashboards, prototypes) in one native macOS workspace — with **Obsidian-style Live Preview editing (`⌘E`)**, **hybrid keyword + semantic search (`⌘P`) and Related Pages powered by [`vault-mcp`](https://github.com/cxrobx/vault-mcp)**, and **inline highlight-to-ask (`ELI5`, `Prove it`, `Ask a question…`)** grounded in your own files on your existing Claude or ChatGPT subscription.
 
-![Highlight a passage, pick Prove it, and the answer streams inline with verified citations from your local folder (illustrative content)](docs/media/onyx-demo.gif)
+![Onyx unified Notes and HTML Artifacts sidebar, ⌘P hybrid search via vault-mcp, interactive HTML artifact, and inline Prove it with verified-on-disk citations (illustrative content)](docs/media/onyx-demo.gif)
 
 <sub>Illustrative article and answer. [Watch the full 38-second overview with sound](https://cxventures.io/products/onyx).</sub>
 
