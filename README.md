@@ -2,7 +2,7 @@
 
 **A local-first second brain for Markdown notes and interactive HTML artifacts on macOS — Obsidian reinvented for the agentic era.**
 
-Onyx unifies your Obsidian Markdown vault and your AI-generated HTML artifacts (interactive reports, explainers, dashboards, prototypes) in one native macOS workspace — with **Obsidian-style Live Preview editing ()**, **hybrid keyword + semantic search () and Related Pages powered by [](https://github.com/cxrobx/vault-mcp)**, and **inline highlight-to-ask (, , )** grounded in your own files on your existing Claude or ChatGPT subscription.
+Onyx unifies your Obsidian Markdown vault and your AI-generated HTML artifacts (interactive reports, explainers, dashboards, prototypes) in one native macOS workspace — with **Obsidian-style Live Preview editing (`⌘E`)**, **hybrid keyword + semantic search (`⌘P`) and Related Pages powered by [`vault-mcp`](https://github.com/cxrobx/vault-mcp)**, and **inline highlight-to-ask (`ELI5`, `Prove it`, `Ask a question…`)** grounded in your own files on your existing Claude or ChatGPT subscription.
 
 ![Highlight a passage, pick Prove it, and the answer streams inline with verified citations from your local folder (illustrative content)](docs/media/onyx-demo.gif)
 
@@ -15,10 +15,16 @@ Coding agents now produce rich interactive HTML artifacts alongside plain Markdo
 Onyx brings both worlds together on disk:
 
 - **One library for Notes + HTML Artifacts:** browse, organize, and cross-link your Obsidian vault and local HTML artifacts side by side. Trusted local HTML keeps its interactive scripts and buttons, and Onyx adapts its chrome to match the page's palette.
-- **Shared hybrid search & MCP ():**  search and the **Related** sidebar rank passages by keywords + local Ollama embeddings across Notes and Artifacts *together* — using the exact same local SQLite index that Claude Code and Codex query over MCP via [](https://github.com/cxrobx/vault-mcp).
+- **Shared hybrid search & MCP (`vault-mcp`):** `⌘P` search and the **Related** sidebar rank passages by keywords + local Ollama embeddings across Notes and Artifacts *together* — using the exact same local SQLite index that Claude Code and Codex query over MCP via [`vault-mcp`](https://github.com/cxrobx/vault-mcp).
 - **Ask inside the page with verified proof:** highlight any passage in a note, HTML artifact, or PDF and right-click for **ELI5**, **Prove it**, or **Ask a question…**. Answers stream inline with a visible tool trace and citations that are verified to exist on disk before they are shown — running strictly on your Claude or ChatGPT subscription, never an API key.
 
-
+```text
+Notes (.md vault) + Artifacts (.html) ──► Onyx (native macOS workspace + Live Preview)
+                  │                              │  ▲
+                  ▼                              ▼  │ answer, tool trace, verified citations
+         vault-mcp (BM25 + embeddings)   local FastAPI service ──► Claude CLI (claude.ai)
+           └─ shared with agents over MCP                      └──► Codex CLI (ChatGPT)
+```
 
 ## Quickstart
 
@@ -64,19 +70,19 @@ Then open a document from **Library**, select a passage, right-click, and choose
 ## What it does
 
 ### Second brain for Notes & HTML Artifacts
-- **Unified Library, Notes & Artifacts sidebar ( /  / ):** browse your Obsidian vault (wikilinks, YAML Properties, callouts, tags, drag-and-drop reorganization with automatic link rewriting) alongside your **Artifacts** folder of interactive HTML pages anywhere on disk.
-- **Obsidian-style Live Preview ():** toggle any Markdown note into inline Live Preview editing with autosave, conflict detection against external edits (Obsidian or agents), interactive task checkboxes, and live outline sync.
+- **Unified Library, Notes & Artifacts sidebar (`⌘N` / `⌘⇧V` / `⌘⇧H`):** browse your Obsidian vault (wikilinks, YAML Properties, callouts, tags, drag-and-drop reorganization with automatic link rewriting) alongside your **Artifacts** folder of interactive HTML pages anywhere on disk.
+- **Obsidian-style Live Preview (`⌘E`):** toggle any Markdown note into inline Live Preview editing with autosave, conflict detection against external edits (Obsidian or agents), interactive task checkboxes, and live outline sync.
 - **First-class interactive HTML:** trusted local HTML artifacts retain their scripts and interactive controls, and **Match page appearance** adapts Onyx's sidebar, tabs, and answer panel to the page's palette automatically.
-- **Hybrid semantic search () & Related Pages:** searches titles and passages across Notes and Artifacts *together* using the shared [](https://github.com/cxrobx/vault-mcp) index (BM25 + local Ollama embeddings) — surfacing related HTML artifacts from a Markdown note and vice versa.
+- **Hybrid semantic search (`⌘P`) & Related Pages:** searches titles and passages across Notes and Artifacts *together* using the shared [`vault-mcp`](https://github.com/cxrobx/vault-mcp) index (BM25 + local Ollama embeddings) — surfacing related HTML artifacts from a Markdown note and vice versa.
 
 ### Inline Highlight-to-Ask & Agent Handoff
 Three actions on any selection (or on a whole page when nothing is selected):
 
 - **ELI5** — explains the passage plainly.
 - **Prove it** — verifies the claim against your context folder and returns a *Supported*, *Partially supported*, *Not supported*, or *No evidence* verdict with verified-on-disk citations.
-- **Ask a question…** — answers anything about the passage, with follow-ups and a searchable conversation history ().
-- **Open in Claude / Codex** — hands the active page, selection, and conversation straight into a dedicated terminal session (or copies the handoff prompt with ).
-- **System-wide integrations:** Obsidian plugin, Alfred workflow ( / ), and macOS Services ().
+- **Ask a question…** — answers anything about the passage, with follow-ups and a searchable conversation history (`⌘Y`).
+- **Open in Claude / Codex** — hands the active page, selection, and conversation straight into a dedicated terminal session (or hold `⌥` Option to copy the prepared handoff prompt).
+- **System-wide integrations:** Obsidian plugin, Alfred workflow (`onx` / `onxc`), and macOS Services (**Ask Selection with Onyx** / **Open in Onyx**).
 
 ## Docs
 
