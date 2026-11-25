@@ -5,7 +5,7 @@ Markdown, text, or PDF document; select a passage; then right-click for **ELI5**
 **Prove it**, or **Ask a question**. Answers stream into the document and can use
 read-only evidence from a context folder you choose.
 
-![Highlight a passage, pick ELI5, and the answer streams into the page with evidence from your folder (illustrative content)](docs/media/onyx-demo.gif)
+![Highlight a passage, pick Prove it, and the answer streams inline with verified citations from your local folder (illustrative content)](docs/media/onyx-demo.gif)
 
 <sub>Illustrative article and answer. [Watch the full 38-second overview with sound](https://cxventures.io/products/onyx).</sub>
 
